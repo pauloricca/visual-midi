@@ -7,12 +7,23 @@
     <link rel="stylesheet" href="/assets/styles.css" />
   </head>
   <body>
+    <script>
+      const syncAppHeight = () => {
+        document.documentElement.style.setProperty("--app-height", `${window.innerHeight}px`);
+      };
+      syncAppHeight();
+      window.addEventListener("resize", syncAppHeight);
+
+      if (new URLSearchParams(window.location.search).has("noqr")) {
+        document.documentElement.classList.add("noqr");
+      }
+    </script>
     <main class="app-shell">
       <header class="app-header">
         <h1 id="app-title">visual-midi</h1>
       </header>
       <section id="layout-root" class="layout-panel"></section>
-      <section id="qr-panel" class="qr-panel" hidden>
+      <section id="qr-panel" class="qr-panel qr-panel--hidden">
         <div class="qr-copy">
           <h2>Open On Your Phone</h2>
           <p>Scan this QR code on the same local network:</p>

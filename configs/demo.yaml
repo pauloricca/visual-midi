@@ -1,29 +1,26 @@
 title: Demo Controller
 output: IAC Driver Bus 1
-layout:
-  type: column
-  gap: 16
-  children:
-    - type: row
-      gap: 16
-      children:
-        - name: Freq
-          channel: 1
-          control: 74
-          default: 64
-          color: "#d26a2e"
-        - name: LFO Freq
-          channel: 1
-          control: 75
-          default: 32
-          color: "#5f8f6b"
-    - type: row
-      gap: 20
-      children:
-        - name: LFO Amp
-          channel: 1
-          control: 76
-          default: 32
-          orientation: vertical
-          height: 260
-          color: "#5077b5"
+columns:
+  - rows:
+      - name: Freq
+        channel: 1
+        control: 74
+        default: 64
+        color: "#d26a2e"
+        height: 70%
+      - name: LFO Freq
+        channel: 1
+        control: 75
+        default: 32
+        color: "#5f8f6b"
+  - rows:
+      - name: Freq 2
+        channel: 1
+        control: 74
+        default: 64
+        color: "#d26a2e"
+      - name: LFO Freq 2
+        channel: 1
+        control: 75
+        default: 32
+        color: "#5f8f6b"

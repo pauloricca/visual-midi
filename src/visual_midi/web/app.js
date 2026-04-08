@@ -6,9 +6,13 @@ const qrImage = document.querySelector("#qr-image");
 
 let currentVersion = null;
 
+function shouldHideQrPanel() {
+  return new URLSearchParams(window.location.search).has("noqr");
+}
+
 function apiUrl(path) {
   const url = new URL(path, window.location.origin);
-  if (window.location.search.includes("noqr")) {
+  if (shouldHideQrPanel()) {
     url.searchParams.set("noqr", "1");
   }
   return url.toString();
@@ -37,7 +41,7 @@ function renderLayout(node) {
 
   const group = document.createElement("section");
   group.className = `layout-group layout-group--${node.type}`;
-  group.style.setProperty("--group-gap", `${node.gap}px`);
+  applyNodeSizing(group, node);
   for (const child of node.children) {
     group.appendChild(renderLayout(child));
   }
@@ -47,12 +51,7 @@ function renderLayout(node) {
 function renderSlider(node) {
   const wrapper = document.createElement("article");
   wrapper.className = `control control--${node.orientation}`;
-  if (node.width) {
-    wrapper.style.width = `${node.width}px`;
-  }
-  if (node.height) {
-    wrapper.style.height = `${node.height}px`;
-  }
+  applyNodeSizing(wrapper, node);
 
   const header = document.createElement("div");
   header.className = "control-header";
@@ -98,13 +97,24 @@ function renderSlider(node) {
   return wrapper;
 }
 
+function applyNodeSizing(element, node) {
+  if (node.width) {
+    element.dataset.width = node.width;
+    element.style.setProperty("--node-width", node.width);
+  }
+  if (node.height) {
+    element.dataset.height = node.height;
+    element.style.setProperty("--node-height", node.height);
+  }
+}
+
 function applyQrPanel(payload) {
-  if (!payload.showQrPanel) {
-    qrPanel.hidden = true;
+  if (!payload.showQrPanel || shouldHideQrPanel()) {
+    qrPanel.classList.add("qr-panel--hidden");
     return;
   }
 
-  qrPanel.hidden = false;
+  qrPanel.classList.remove("qr-panel--hidden");
   qrLink.href = payload.qr.url;
   qrLink.textContent = payload.qr.url;
   qrImage.src = payload.qr.image;

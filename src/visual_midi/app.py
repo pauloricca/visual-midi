@@ -6,6 +6,7 @@ import errno
 import io
 import json
 import mimetypes
+import re
 import socket
 import webbrowser
 from dataclasses import dataclass
@@ -26,6 +27,13 @@ CONFIG_DIR = Path.cwd() / "configs"
 STATIC_DIR = Path(__file__).with_name("web")
 DEFAULT_WEB_PORT = 8765
 RELOAD_POLL_MS = 1000
+SIZE_PATTERN = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(%|px)\s*$")
+
+
+@dataclass(frozen=True)
+class SizeSpec:
+    value: float
+    unit: str
 
 
 @dataclass(frozen=True)
@@ -38,8 +46,8 @@ class SliderConfig:
     maximum: int = 127
     orientation: str = "horizontal"
     color: str = "#d26a2e"
-    width: int | None = None
-    height: int | None = None
+    width: SizeSpec | None = None
+    height: SizeSpec | None = None
 
     @property
     def state_key(self) -> str:
@@ -49,8 +57,9 @@ class SliderConfig:
 @dataclass(frozen=True)
 class GroupConfig:
     kind: str
-    gap: int
     children: list["LayoutNode"]
+    width: SizeSpec | None = None
+    height: SizeSpec | None = None
 
 
 LayoutNode = Union[SliderConfig, GroupConfig]
@@ -113,7 +122,7 @@ def build_web_server(*, runtime: "RuntimeState") -> ThreadingHTTPServer:
             parsed = urlparse(self.path)
 
             if parsed.path == "/api/config":
-                query = parse_qs(parsed.query)
+                query = parse_qs(parsed.query, keep_blank_values=True)
                 hide_qr_panel = "noqr" in query
                 payload = json.dumps(
                     runtime.frontend_payload(
@@ -183,6 +192,9 @@ def build_web_server(*, runtime: "RuntimeState") -> ThreadingHTTPServer:
             content_type, _ = mimetypes.guess_type(file_path.name)
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", content_type or "application/octet-stream")
+            self.send_header("Cache-Control", "no-store, max-age=0")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Expires", "0")
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
             self.wfile.write(payload)
@@ -231,23 +243,7 @@ def load_config(config_path: Path) -> AppConfig:
     if not isinstance(output, str) or not output.strip():
         raise SystemExit(f"Config {config_path} must define a non-empty 'output'")
 
-    if isinstance(raw.get("layout"), dict):
-        layout = parse_group(config_path=config_path, path="layout", raw=raw["layout"])
-    else:
-        slider_items = raw.get("sliders")
-        if not isinstance(slider_items, list) or not slider_items:
-            raise SystemExit(
-                f"Config {config_path} must define either 'layout' or a non-empty 'sliders' list"
-            )
-        layout = GroupConfig(
-            kind="column",
-            gap=12,
-            children=[
-                parse_slider(item, config_path=config_path, path=f"sliders[{index}]")
-                for index, item in enumerate(slider_items)
-            ],
-        )
-
+    layout = parse_root_layout(raw=raw, config_path=config_path)
     sliders = collect_sliders(layout)
     if not sliders:
         raise SystemExit(f"Config {config_path} must contain at least one slider")
@@ -255,27 +251,63 @@ def load_config(config_path: Path) -> AppConfig:
     return AppConfig(title=title, output=output.strip(), layout=layout, sliders=sliders)
 
 
-def parse_group(*, config_path: Path, path: str, raw: dict[str, Any]) -> GroupConfig:
-    kind = str(raw.get("type", "column"))
-    if kind not in {"row", "column"}:
-        raise SystemExit(f"{config_path} {path}.type must be 'row' or 'column'")
+def parse_root_layout(*, raw: dict[str, Any], config_path: Path) -> GroupConfig:
+    container_keys = [key for key in ("rows", "columns") if key in raw]
+    if len(container_keys) != 1:
+        raise SystemExit(f"Config {config_path} must define exactly one of 'rows' or 'columns'")
+    key = container_keys[0]
+    return parse_group(
+        kind="row" if key == "rows" else "column",
+        children_raw=raw[key],
+        config_path=config_path,
+        path=key,
+        raw=raw,
+    )
 
-    gap = int(raw.get("gap", 12))
-    children_raw = raw.get("children")
+
+def parse_group(
+    *,
+    kind: str,
+    children_raw: Any,
+    config_path: Path,
+    path: str,
+    raw: dict[str, Any],
+) -> GroupConfig:
     if not isinstance(children_raw, list) or not children_raw:
-        raise SystemExit(f"{config_path} {path}.children must be a non-empty list")
+        raise SystemExit(f"{config_path} {path} must be a non-empty list")
 
     children: list[LayoutNode] = []
     for index, item in enumerate(children_raw):
-        child_path = f"{path}.children[{index}]"
+        child_path = f"{path}[{index}]"
         if not isinstance(item, dict):
             raise SystemExit(f"{config_path} {child_path} must be a mapping")
-        child_type = item.get("type", "slider")
-        if child_type in {"row", "column"}:
-            children.append(parse_group(config_path=config_path, path=child_path, raw=item))
+
+        child_container_keys = [key for key in ("rows", "columns") if key in item]
+        if len(child_container_keys) > 1:
+            raise SystemExit(
+                f"{config_path} {child_path} must not define both 'rows' and 'columns'"
+            )
+
+        if child_container_keys:
+            child_key = child_container_keys[0]
+            children.append(
+                parse_group(
+                    kind="row" if child_key == "rows" else "column",
+                    children_raw=item[child_key],
+                    config_path=config_path,
+                    path=f"{child_path}.{child_key}",
+                    raw=item,
+                )
+            )
         else:
             children.append(parse_slider(item, config_path=config_path, path=child_path))
-    return GroupConfig(kind=kind, gap=gap, children=children)
+
+    return GroupConfig(
+        kind=kind,
+        children=children,
+        width=parse_size(raw.get("width"), config_path=config_path, path=f"{path}.width"),
+        height=parse_size(raw.get("height"), config_path=config_path, path=f"{path}.height"),
+    )
 
 
 def parse_slider(raw: dict[str, Any], *, config_path: Path, path: str) -> SliderConfig:
@@ -289,8 +321,8 @@ def parse_slider(raw: dict[str, Any], *, config_path: Path, path: str) -> Slider
             maximum=validate_range(int(raw.get("max", 127)), 0, 127, f"{path}.max", config_path),
             orientation=str(raw.get("orientation", "horizontal")),
             color=str(raw.get("color", "#d26a2e")),
-            width=int(raw["width"]) if "width" in raw else None,
-            height=int(raw["height"]) if "height" in raw else None,
+            width=parse_size(raw.get("width"), config_path=config_path, path=f"{path}.width"),
+            height=parse_size(raw.get("height"), config_path=config_path, path=f"{path}.height"),
         )
     except KeyError as exc:
         missing = exc.args[0]
@@ -303,6 +335,20 @@ def parse_slider(raw: dict[str, Any], *, config_path: Path, path: str) -> Slider
     if slider.orientation not in {"horizontal", "vertical"}:
         raise SystemExit(f"{config_path} {path}.orientation must be 'horizontal' or 'vertical'")
     return slider
+
+
+def parse_size(value: Any, *, config_path: Path, path: str) -> SizeSpec | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return SizeSpec(value=float(value), unit="px")
+    if not isinstance(value, str):
+        raise SystemExit(f"{config_path} {path} must be a string like '70%' or '240px'")
+
+    match = SIZE_PATTERN.match(value)
+    if match is None:
+        raise SystemExit(f"{config_path} {path} must be a string like '70%' or '240px'")
+    return SizeSpec(value=float(match.group(1)), unit=match.group(2))
 
 
 def collect_sliders(node: LayoutNode) -> list[SliderConfig]:
@@ -388,7 +434,9 @@ class RuntimeState:
         self.reload_if_needed()
         with self.lock:
             for slider in self._config.sliders:
-                self._update_slider_locked(slider, self._state.get(slider.state_key, slider.default))
+                self._update_slider_locked(
+                    slider, self._state.get(slider.state_key, slider.default)
+                )
 
     def frontend_payload(self, *, hide_qr_panel: bool, port: int) -> dict[str, Any]:
         self.reload_if_needed()
@@ -445,7 +493,9 @@ class RuntimeState:
             self._version += 1
             self._last_reload_error = None
             for slider in self._config.sliders:
-                self._update_slider_locked(slider, self._state.get(slider.state_key, slider.default))
+                self._update_slider_locked(
+                    slider, self._state.get(slider.state_key, slider.default)
+                )
 
         if new_midi_out is not None:
             old_midi_out.close()
@@ -465,14 +515,15 @@ class RuntimeState:
                 "max": node.maximum,
                 "orientation": node.orientation,
                 "color": node.color,
-                "width": node.width,
-                "height": node.height,
+                "width": serialize_size(node.width),
+                "height": serialize_size(node.height),
                 "label": self.format_slider_label(node, value),
             }
 
         return {
-            "type": node.kind,
-            "gap": node.gap,
+            "type": "rows" if node.kind == "row" else "columns",
+            "width": serialize_size(node.width),
+            "height": serialize_size(node.height),
             "children": [self._serialize_layout(child) for child in node.children],
         }
 
@@ -516,3 +567,13 @@ class RuntimeState:
     @staticmethod
     def format_slider_label(slider: SliderConfig, value: int) -> str:
         return f"{slider.name}: {value}"
+
+
+def serialize_size(size: SizeSpec | None) -> str | None:
+    if size is None:
+        return None
+    if size.unit == "px":
+        return f"{int(size.value)}px"
+    if size.value.is_integer():
+        return f"{int(size.value)}%"
+    return f"{size.value}%"

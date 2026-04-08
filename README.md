@@ -15,44 +15,43 @@ The server prefers port `8765` on each run and falls back to a random free port 
 
 ## Config format
 
-Configs stay in YAML, but the backend normalizes them into JSON for the browser UI. You can keep the old flat `sliders:` list, or use nested `layout` groups for rows and columns.
+Configs stay in YAML, but the backend normalizes them into JSON for the browser UI. Layout is now defined as nested `rows` and `columns` containers. Children do not declare their own type: a node is a container if it has `rows:` or `columns:`, otherwise it is treated as a control.
 
 ```yaml
 title: Demo Controller
 output: IAC Driver Bus 1
-layout:
-  type: column
-  gap: 16
-  children:
-    - type: row
-      gap: 16
-      children:
-        - name: Filter Cutoff
-          channel: 1
-          control: 74
-          default: 64
-          color: "#d26a2e"
-        - name: Resonance
-          channel: 1
-          control: 71
-          default: 32
-          color: "#5f8f6b"
-    - type: row
-      gap: 20
-      children:
-        - name: Attack
-          channel: 1
-          control: 73
-          default: 20
-          orientation: vertical
-          height: 260
-        - name: Release
-          channel: 1
-          control: 72
-          default: 80
-          orientation: vertical
-          height: 260
+columns:
+  - rows:
+      - name: Freq
+        channel: 1
+        control: 74
+        default: 64
+        color: "#d26a2e"
+        height: 70%
+      - name: LFO Freq
+        channel: 1
+        control: 75
+        default: 32
+        color: "#5f8f6b"
+  - rows:
+      - name: Freq 2
+        channel: 1
+        control: 74
+        default: 64
+        color: "#d26a2e"
+      - name: LFO Freq 2
+        channel: 1
+        control: 75
+        default: 32
+        color: "#5f8f6b"
 ```
+
+The layout fills the available UI area as a mosaic:
+
+- children inside `rows` split the available height equally by default
+- children inside `columns` split the available width equally by default
+- explicit `width` or `height` values can be set with `%` or `px`
+- any remaining space is distributed evenly across siblings without an explicit size
 
 Supported slider fields:
 
@@ -62,13 +61,13 @@ Supported slider fields:
 - `default`, `min`, `max`
 - `orientation`: `horizontal` or `vertical`
 - `color`: any CSS color string
-- `width`, `height`: optional pixel sizes for the control container
+- `width`, `height`: optional `%` or `px` sizes for the control tile
 
 Supported layout group fields:
 
-- `type`: `row` or `column`
-- `gap`: spacing between children in pixels
-- `children`: nested groups or sliders
+- `rows`
+- `columns`
+- `width`, `height`: optional `%` or `px` sizes for the container tile
 
 ## Notes
 
