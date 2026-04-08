@@ -30,6 +30,8 @@ body {
   min-height: -webkit-fill-available;
   overflow: hidden;
   overscroll-behavior: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .app-shell {
@@ -170,6 +172,8 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 20px;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .qr-panel--hidden,

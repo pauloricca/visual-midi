@@ -1,4 +1,3 @@
-title: Demo Controller
 output: IAC Driver Bus 1
 inertia: 2
 palette:
@@ -11,37 +10,80 @@ palette:
   teal: "#4f8f88"
 columns:
   - rows:
-      - name: Freq
+      - name: Freq A
         channel: 1
-        control: 74
+        control: 1
         default: 64
         color: sand
         height: 70%
-      - columns:
-          - name: LFO Freq
+      - rows:
+          - name: Amp A
             channel: 1
-            control: 75
+            control: 2
             default: 32
             color: moss
-          - name: LFO Freq 2
+            orientation: horizontal
+          - name: LFO Freq A
             channel: 1
-            control: 75
+            control: 3
             default: 32
             color: moss
-          - name: LFO Freq 3
+            orientation: horizontal
+          - name: LFO Amp A
             channel: 1
-            control: 75
+            control: 4
             default: 32
             color: moss
+            orientation: horizontal
   - rows:
-      - name: Freq 2
+      - name: Freq B
         channel: 1
-        control: 74
+        control: 11
         default: 64
         color: orange
         height: 70%
-      - name: LFO Freq 2
+      - rows:
+          - name: Amp B
+            channel: 1
+            control: 12
+            default: 32
+            color: plum
+            orientation: horizontal
+          - name: LFO Freq B
+            channel: 1
+            control: 13
+            default: 32
+            color: plum
+            orientation: horizontal
+          - name: LFO Amp B
+            channel: 1
+            control: 14
+            default: 32
+            color: plum
+            orientation: horizontal
+  - rows:
+      - name: Freq C
         channel: 1
-        control: 75
-        default: 32
-        color: plum
+        control: 21
+        default: 64
+        color: slate
+        height: 70%
+      - rows:
+          - name: Amp C
+            channel: 1
+            control: 22
+            default: 32
+            color: teal
+            orientation: horizontal
+          - name: LFO Freq C
+            channel: 1
+            control: 23
+            default: 32
+            color: teal
+            orientation: horizontal
+          - name: LFO Amp C
+            channel: 1
+            control: 24
+            default: 32
+            color: teal
+            orientation: horizontal

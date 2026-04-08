@@ -2,7 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
+    />
     <title>visual-midi</title>
     <link rel="stylesheet" href="/assets/styles.css" />
   </head>
@@ -13,6 +16,38 @@
       };
       syncAppHeight();
       window.addEventListener("resize", syncAppHeight);
+      window.addEventListener("orientationchange", syncAppHeight);
+
+      let lastTouchEnd = 0;
+      document.addEventListener(
+        "touchstart",
+        (event) => {
+          if (event.touches.length > 1) {
+            event.preventDefault();
+          }
+        },
+        { passive: false }
+      );
+      document.addEventListener(
+        "touchmove",
+        (event) => {
+          if (event.scale && event.scale !== 1) {
+            event.preventDefault();
+          }
+        },
+        { passive: false }
+      );
+      document.addEventListener(
+        "touchend",
+        (event) => {
+          const now = Date.now();
+          if (now - lastTouchEnd < 300) {
+            event.preventDefault();
+          }
+          lastTouchEnd = now;
+        },
+        { passive: false }
+      );
 
       if (new URLSearchParams(window.location.search).has("noqr")) {
         document.documentElement.classList.add("noqr");

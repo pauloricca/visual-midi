@@ -1,4 +1,5 @@
 const titleNode = document.querySelector("#app-title");
+const appHeader = document.querySelector(".app-header");
 const layoutRoot = document.querySelector("#layout-root");
 const qrPanel = document.querySelector("#qr-panel");
 const qrLink = document.querySelector("#qr-link");
@@ -9,6 +10,7 @@ let currentVersion = null;
 const INERTIA_VELOCITY_THRESHOLD = 80;
 const INERTIA_FRICTION_PER_FRAME = 0.9;
 const INERTIA_MIN_VELOCITY = 8;
+const WHEEL_STEP_SCALE = 0.18;
 
 function shouldHideQrPanel() {
   return new URLSearchParams(window.location.search).has("noqr");
@@ -131,6 +133,25 @@ function renderSlider(node) {
     }
     stopInertia(state);
   });
+
+  wrapper.addEventListener(
+    "wheel",
+    (event) => {
+      event.preventDefault();
+      stopInertia(state);
+      const dominantDelta =
+        Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
+      const direction = dominantDelta > 0 ? 1 : -1;
+      const step = Math.max(1, Math.round((state.max - state.min) * WHEEL_STEP_SCALE * 0.01));
+      const nextValue = clamp(state.value + direction * step, state.min, state.max);
+      if (nextValue === state.value) {
+        return;
+      }
+      updateSliderVisuals(state, nextValue);
+      queueSliderUpdate(state, nextValue);
+    },
+    { passive: false }
+  );
 
   return wrapper;
 }
@@ -291,8 +312,14 @@ function applyQrPanel(payload) {
 async function loadApp() {
   const payload = await fetchConfig();
   currentVersion = payload.version;
-  document.title = payload.title;
-  titleNode.textContent = payload.title;
+  document.title = payload.title || "visual-midi";
+  if (payload.title) {
+    appHeader.hidden = false;
+    titleNode.textContent = payload.title;
+  } else {
+    appHeader.hidden = true;
+    titleNode.textContent = "";
+  }
   layoutRoot.replaceChildren(renderLayoutWithConfig(payload.layout, payload));
   applyQrPanel(payload);
   scheduleVersionPolling(payload.reloadPollMs);

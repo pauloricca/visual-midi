@@ -67,7 +67,7 @@ LayoutNode = Union[SliderConfig, GroupConfig]
 
 @dataclass(frozen=True)
 class AppConfig:
-    title: str
+    title: str | None
     output: str
     inertia: float
     layout: GroupConfig
@@ -104,7 +104,7 @@ def run_web_app(*, runtime: "RuntimeState") -> None:
     browser_url = f"http://127.0.0.1:{port}/"
     lan_ip = detect_local_ip_address()
     external_url = f"http://{lan_ip}:{port}/" if lan_ip else browser_url
-    print(f"Serving {runtime.current_config().title} at {browser_url}")
+    print(f"Serving {runtime.current_config().title or 'visual-midi'} at {browser_url}")
     if external_url != browser_url:
         print(f"LAN access: {external_url}")
     webbrowser.open(browser_url, new=1)
@@ -239,7 +239,13 @@ def load_config(config_path: Path) -> AppConfig:
     with config_path.open("r", encoding="utf-8") as handle:
         raw = yaml.safe_load(handle) or {}
 
-    title = str(raw.get("title") or config_path.stem)
+    raw_title = raw.get("title")
+    if raw_title is None:
+        title = None
+    elif isinstance(raw_title, str):
+        title = raw_title.strip() or None
+    else:
+        raise SystemExit(f"Config {config_path} title must be a string if provided")
     output = raw.get("output")
     if not isinstance(output, str) or not output.strip():
         raise SystemExit(f"Config {config_path} must define a non-empty 'output'")
