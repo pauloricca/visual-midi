@@ -1,5 +1,6 @@
 title: Demo Controller
 output: IAC Driver Bus 1
+inertia: 2
 palette:
   orange: "#d26a2e"
   moss: "#5f8f6b"
@@ -16,18 +17,29 @@ columns:
         default: 64
         color: sand
         height: 70%
-      - name: LFO Freq
-        channel: 1
-        control: 75
-        default: 32
-        color: moss
+      - columns:
+          - name: LFO Freq
+            channel: 1
+            control: 75
+            default: 32
+            color: moss
+          - name: LFO Freq 2
+            channel: 1
+            control: 75
+            default: 32
+            color: moss
+          - name: LFO Freq 3
+            channel: 1
+            control: 75
+            default: 32
+            color: moss
   - rows:
       - name: Freq 2
         channel: 1
         control: 74
         default: 64
         color: orange
-        orientation: horizontal
+        height: 70%
       - name: LFO Freq 2
         channel: 1
         control: 75

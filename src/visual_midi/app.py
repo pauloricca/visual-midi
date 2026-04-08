@@ -69,6 +69,7 @@ LayoutNode = Union[SliderConfig, GroupConfig]
 class AppConfig:
     title: str
     output: str
+    inertia: float
     layout: GroupConfig
     sliders: list[SliderConfig]
 
@@ -242,6 +243,7 @@ def load_config(config_path: Path) -> AppConfig:
     output = raw.get("output")
     if not isinstance(output, str) or not output.strip():
         raise SystemExit(f"Config {config_path} must define a non-empty 'output'")
+    inertia = parse_inertia(raw.get("inertia", 1.0), config_path=config_path, path="inertia")
 
     palette = parse_palette(raw.get("palette"), config_path=config_path)
     layout = parse_root_layout(raw=raw, config_path=config_path, palette=palette)
@@ -249,7 +251,13 @@ def load_config(config_path: Path) -> AppConfig:
     if not sliders:
         raise SystemExit(f"Config {config_path} must contain at least one slider")
 
-    return AppConfig(title=title, output=output.strip(), layout=layout, sliders=sliders)
+    return AppConfig(
+        title=title,
+        output=output.strip(),
+        inertia=inertia,
+        layout=layout,
+        sliders=sliders,
+    )
 
 
 def parse_palette(raw: Any, *, config_path: Path) -> dict[str, str]:
@@ -372,6 +380,16 @@ def resolve_color(
     return palette.get(color, color)
 
 
+def parse_inertia(raw: Any, *, config_path: Path, path: str) -> float:
+    try:
+        value = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise SystemExit(f"{config_path} {path} must be a number") from exc
+    if value < 0:
+        raise SystemExit(f"{config_path} {path} must be 0 or greater")
+    return value
+
+
 def parse_size(value: Any, *, config_path: Path, path: str) -> SizeSpec | None:
     if value is None:
         return None
@@ -481,6 +499,7 @@ class RuntimeState:
         qr_url = f"{base_url}?noqr"
         return {
             "title": config.title,
+            "inertia": config.inertia,
             "version": self.version(),
             "layout": self._serialize_layout(config.layout),
             "showQrPanel": not hide_qr_panel,

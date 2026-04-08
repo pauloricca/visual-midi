@@ -20,6 +20,7 @@ Configs stay in YAML, but the backend normalizes them into JSON for the browser 
 ```yaml
 title: Demo Controller
 output: IAC Driver Bus 1
+inertia: 1.2
 palette:
   orange: "#d26a2e"
   moss: "#5f8f6b"
@@ -74,6 +75,7 @@ Supported layout group fields:
 
 Optional root fields:
 
+- `inertia`: global multiplier for release throw, where `1.0` is the default feel and `0` disables inertia
 - `palette`: a mapping of color names to CSS color strings
 
 ## Notes
