@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>visual-midi</title>
+    <link rel="stylesheet" href="/assets/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="app-header">
+        <h1 id="app-title">visual-midi</h1>
+      </header>
+      <section id="layout-root" class="layout-panel"></section>
+      <section id="qr-panel" class="qr-panel" hidden>
+        <div class="qr-copy">
+          <h2>Open On Your Phone</h2>
+          <p>Scan this QR code on the same local network:</p>
+          <p><a id="qr-link" href="#"></a></p>
+        </div>
+        <img id="qr-image" class="qr-image" alt="QR code" />
+      </section>
+    </main>
+    <script type="module" src="/assets/app.js"></script>
+  </body>
+</html>

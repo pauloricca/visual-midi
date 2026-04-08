@@ -5,17 +5,16 @@ import base64
 import errno
 import io
 import json
+import mimetypes
 import socket
-import tkinter as tk
 import webbrowser
 from dataclasses import dataclass
-from html import escape
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Lock
-from tkinter import ttk
-from typing import Any
+from typing import Any, Union
+from urllib.parse import parse_qs, urlparse
 
 import mido
 import qrcode
@@ -24,6 +23,7 @@ import yaml
 
 STATE_DIR = Path.home() / ".visual-midi" / "states"
 CONFIG_DIR = Path.cwd() / "configs"
+STATIC_DIR = Path(__file__).with_name("web")
 DEFAULT_WEB_PORT = 8765
 RELOAD_POLL_MS = 1000
 
@@ -36,6 +36,10 @@ class SliderConfig:
     default: int = 0
     minimum: int = 0
     maximum: int = 127
+    orientation: str = "horizontal"
+    color: str = "#d26a2e"
+    width: int | None = None
+    height: int | None = None
 
     @property
     def state_key(self) -> str:
@@ -43,12 +47,21 @@ class SliderConfig:
 
 
 @dataclass(frozen=True)
+class GroupConfig:
+    kind: str
+    gap: int
+    children: list["LayoutNode"]
+
+
+LayoutNode = Union[SliderConfig, GroupConfig]
+
+
+@dataclass(frozen=True)
 class AppConfig:
     title: str
     output: str
+    layout: GroupConfig
     sliders: list[SliderConfig]
-    width: int = 960
-    height: int = 420
 
 
 def main() -> None:
@@ -61,10 +74,7 @@ def main() -> None:
     runtime.send_all_states()
 
     try:
-        if args.web:
-            run_web_app(runtime=runtime)
-        else:
-            run_tk_app(runtime=runtime)
+        run_web_app(runtime=runtime)
     finally:
         runtime.close()
 
@@ -72,21 +82,10 @@ def main() -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="visual-midi",
-        description="Render a MIDI controller UI from a YAML file.",
+        description="Run the web-based MIDI controller for a YAML config.",
     )
     parser.add_argument("config_name", help="YAML config name without the .yaml suffix")
-    parser.add_argument(
-        "--web",
-        action="store_true",
-        help="Serve the controller as a local web app and open it in the default browser.",
-    )
     return parser.parse_args()
-
-
-def run_tk_app(*, runtime: "RuntimeState") -> None:
-    root = tk.Tk()
-    MidiControllerTkApp(root=root, runtime=runtime)
-    root.mainloop()
 
 
 def run_web_app(*, runtime: "RuntimeState") -> None:
@@ -111,20 +110,25 @@ def run_web_app(*, runtime: "RuntimeState") -> None:
 def build_web_server(*, runtime: "RuntimeState") -> ThreadingHTTPServer:
     class MidiWebHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
-            if self.path == "/" or self.path == "/?noqr":
-                payload = render_web_ui(
-                    runtime=runtime,
-                    port=self.server.server_address[1],
-                    hide_qr_panel=self.path.endswith("?noqr"),
-                )
+            parsed = urlparse(self.path)
+
+            if parsed.path == "/api/config":
+                query = parse_qs(parsed.query)
+                hide_qr_panel = "noqr" in query
+                payload = json.dumps(
+                    runtime.frontend_payload(
+                        hide_qr_panel=hide_qr_panel,
+                        port=self.server.server_address[1],
+                    )
+                ).encode("utf-8")
                 self.send_response(HTTPStatus.OK)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
                 self.wfile.write(payload)
                 return
 
-            if self.path == "/api/version":
+            if parsed.path == "/api/version":
                 payload = json.dumps({"version": runtime.version()}).encode("utf-8")
                 self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -133,10 +137,19 @@ def build_web_server(*, runtime: "RuntimeState") -> ThreadingHTTPServer:
                 self.wfile.write(payload)
                 return
 
+            if parsed.path == "/" or parsed.path == "/index.html":
+                self.serve_static_file("index.html")
+                return
+
+            if parsed.path.startswith("/assets/"):
+                self.serve_static_file(parsed.path.removeprefix("/assets/"))
+                return
+
             self.send_error(HTTPStatus.NOT_FOUND, "Not found")
 
         def do_POST(self) -> None:
-            if self.path != "/api/slider":
+            parsed = urlparse(self.path)
+            if parsed.path != "/api/slider":
                 self.send_error(HTTPStatus.NOT_FOUND, "Not found")
                 return
 
@@ -160,6 +173,20 @@ def build_web_server(*, runtime: "RuntimeState") -> ThreadingHTTPServer:
             self.end_headers()
             self.wfile.write(payload)
 
+        def serve_static_file(self, relative_path: str) -> None:
+            file_path = (STATIC_DIR / relative_path).resolve()
+            if not str(file_path).startswith(str(STATIC_DIR.resolve())) or not file_path.exists():
+                self.send_error(HTTPStatus.NOT_FOUND, "Not found")
+                return
+
+            payload = file_path.read_bytes()
+            content_type, _ = mimetypes.guess_type(file_path.name)
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", content_type or "application/octet-stream")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
         def log_message(self, format: str, *args: Any) -> None:
             return
 
@@ -169,251 +196,6 @@ def build_web_server(*, runtime: "RuntimeState") -> ThreadingHTTPServer:
         if exc.errno != errno.EADDRINUSE:
             raise
         return ThreadingHTTPServer(("0.0.0.0", 0), MidiWebHandler)
-
-
-def render_web_ui(*, runtime: "RuntimeState", port: int, hide_qr_panel: bool) -> bytes:
-    config = runtime.current_config()
-    lan_ip = detect_local_ip_address()
-    external_url = f"http://{lan_ip}:{port}/" if lan_ip else f"http://127.0.0.1:{port}/"
-    qr_target_url = f"{external_url}?noqr"
-    qr_code_data_url = generate_qr_code_data_url(qr_target_url)
-    page_version = runtime.version()
-
-    slider_rows: list[str] = []
-    for slider in config.sliders:
-        value = runtime.get_slider_value(slider)
-        slider_rows.append(
-            f"""
-            <section class="slider-row">
-              <div class="slider-header">
-                <label class="slider-label" for="{escape(slider.state_key)}" data-key="{escape(slider.state_key)}">
-                  {escape(runtime.format_slider_label(slider, value))}
-                </label>
-                <div class="slider-meta">CH {slider.channel} CC {slider.control}</div>
-              </div>
-              <input
-                id="{escape(slider.state_key)}"
-                class="slider-input"
-                type="range"
-                min="{slider.minimum}"
-                max="{slider.maximum}"
-                step="1"
-                value="{value}"
-                data-key="{escape(slider.state_key)}"
-                data-name="{escape(slider.name)}"
-              />
-            </section>
-            """
-        )
-
-    document = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>{escape(config.title)}</title>
-  <style>
-    :root {{
-      color-scheme: light;
-      --bg: #f4f2ec;
-      --panel: #fffdf8;
-      --text: #1f1d1a;
-      --muted: #726a5f;
-      --border: #ddd4c6;
-      --accent: #d26a2e;
-    }}
-    * {{
-      box-sizing: border-box;
-    }}
-    body {{
-      margin: 0;
-      font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
-      background: linear-gradient(180deg, #f7f4ee 0%, var(--bg) 100%);
-      color: var(--text);
-    }}
-    main {{
-      max-width: 960px;
-      margin: 0 auto;
-      padding: 24px 16px 40px;
-    }}
-    h1 {{
-      margin: 0 0 18px;
-      font-size: 2rem;
-      line-height: 1.1;
-    }}
-    .stack {{
-      display: grid;
-      gap: 12px;
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      padding: 14px 16px 16px;
-      box-shadow: 0 8px 20px rgba(65, 44, 22, 0.06);
-    }}
-    .slider-row + .slider-row {{
-      margin-top: 14px;
-      padding-top: 14px;
-      border-top: 1px solid var(--border);
-    }}
-    .slider-header {{
-      display: flex;
-      justify-content: space-between;
-      align-items: baseline;
-      gap: 12px;
-      margin-bottom: 8px;
-    }}
-    .slider-label {{
-      font-size: 1rem;
-      font-weight: 600;
-    }}
-    .slider-meta {{
-      color: var(--muted);
-      font-size: 0.95rem;
-      white-space: nowrap;
-    }}
-    .slider-input {{
-      -webkit-appearance: none;
-      appearance: none;
-      width: 100%;
-      height: 44px;
-      background: transparent;
-      margin: 0;
-    }}
-    .slider-input:focus {{
-      outline: none;
-    }}
-    .slider-input::-webkit-slider-runnable-track {{
-      height: 10px;
-      background: #d8cdbd;
-      border-radius: 999px;
-    }}
-    .slider-input::-webkit-slider-thumb {{
-      -webkit-appearance: none;
-      appearance: none;
-      width: 34px;
-      height: 34px;
-      margin-top: -12px;
-      border-radius: 50%;
-      border: 2px solid #b04c17;
-      background: var(--accent);
-      box-shadow: 0 4px 10px rgba(210, 106, 46, 0.35);
-    }}
-    .slider-input::-moz-range-track {{
-      height: 10px;
-      background: #d8cdbd;
-      border-radius: 999px;
-    }}
-    .slider-input::-moz-range-thumb {{
-      width: 34px;
-      height: 34px;
-      border: 2px solid #b04c17;
-      border-radius: 50%;
-      background: var(--accent);
-      box-shadow: 0 4px 10px rgba(210, 106, 46, 0.35);
-    }}
-    .slider-input::-moz-range-progress {{
-      height: 10px;
-      background: #e3996b;
-      border-radius: 999px;
-    }}
-    .qr-panel {{
-      margin-top: 24px;
-      padding: 18px 16px;
-      background: rgba(255, 253, 248, 0.72);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 20px;
-    }}
-    .qr-copy {{
-      min-width: 0;
-    }}
-    .qr-copy h2 {{
-      margin: 0 0 8px;
-      font-size: 1rem;
-    }}
-    .qr-copy p {{
-      margin: 0;
-      color: var(--muted);
-      line-height: 1.45;
-      word-break: break-all;
-    }}
-    .qr-image {{
-      width: 108px;
-      height: 108px;
-      display: block;
-      border-radius: 10px;
-      background: white;
-      padding: 8px;
-      border: 1px solid var(--border);
-    }}
-    @media (max-width: 640px) {{
-      .qr-panel {{
-        flex-direction: column;
-        align-items: flex-start;
-      }}
-    }}
-  </style>
-</head>
-  <body>
-  <main>
-    <h1>{escape(config.title)}</h1>
-    <div class="stack">
-      {"".join(slider_rows)}
-    </div>
-    <section class="qr-panel" style="{ 'display:none;' if hide_qr_panel else '' }">
-      <div class="qr-copy">
-        <h2>Open On Your Phone</h2>
-        <p>Scan this QR code on the same local network:</p>
-        <p><a href="{escape(qr_target_url)}">{escape(qr_target_url)}</a></p>
-      </div>
-      <img class="qr-image" src="{qr_code_data_url}" alt="QR code for {escape(qr_target_url)}" />
-    </section>
-  </main>
-  <script>
-    let pageVersion = {page_version};
-    const sliderLabels = new Map(
-      Array.from(document.querySelectorAll('.slider-label')).map((node) => [node.dataset.key, node])
-    );
-
-    for (const input of document.querySelectorAll('.slider-input')) {{
-      input.addEventListener('input', async (event) => {{
-        const slider = event.currentTarget;
-        const key = slider.dataset.key;
-        const value = Number(slider.value);
-        const label = sliderLabels.get(key);
-        if (label) {{
-          label.textContent = `${{slider.dataset.name}}: ${{value}}`;
-        }}
-
-        try {{
-          await fetch('/api/slider', {{
-            method: 'POST',
-            headers: {{ 'Content-Type': 'application/json' }},
-            body: JSON.stringify({{ key, value }})
-          }});
-        }} catch (_error) {{
-        }}
-      }});
-    }}
-
-    setInterval(async () => {{
-      try {{
-        const response = await fetch('/api/version', {{ cache: 'no-store' }});
-        const data = await response.json();
-        if (data.version !== pageVersion) {{
-          window.location.reload();
-        }}
-      }} catch (_error) {{
-      }}
-    }}, {RELOAD_POLL_MS});
-  </script>
-</body>
-</html>
-"""
-    return document.encode("utf-8")
 
 
 def detect_local_ip_address() -> str | None:
@@ -449,53 +231,94 @@ def load_config(config_path: Path) -> AppConfig:
     if not isinstance(output, str) or not output.strip():
         raise SystemExit(f"Config {config_path} must define a non-empty 'output'")
 
-    window = raw.get("window") or {}
-    width = int(window.get("width", 960))
-    height = int(window.get("height", 420))
+    if isinstance(raw.get("layout"), dict):
+        layout = parse_group(config_path=config_path, path="layout", raw=raw["layout"])
+    else:
+        slider_items = raw.get("sliders")
+        if not isinstance(slider_items, list) or not slider_items:
+            raise SystemExit(
+                f"Config {config_path} must define either 'layout' or a non-empty 'sliders' list"
+            )
+        layout = GroupConfig(
+            kind="column",
+            gap=12,
+            children=[
+                parse_slider(item, config_path=config_path, path=f"sliders[{index}]")
+                for index, item in enumerate(slider_items)
+            ],
+        )
 
-    slider_items = raw.get("sliders")
-    if not isinstance(slider_items, list) or not slider_items:
-        raise SystemExit(f"Config {config_path} must define a non-empty 'sliders' list")
+    sliders = collect_sliders(layout)
+    if not sliders:
+        raise SystemExit(f"Config {config_path} must contain at least one slider")
+
+    return AppConfig(title=title, output=output.strip(), layout=layout, sliders=sliders)
+
+
+def parse_group(*, config_path: Path, path: str, raw: dict[str, Any]) -> GroupConfig:
+    kind = str(raw.get("type", "column"))
+    if kind not in {"row", "column"}:
+        raise SystemExit(f"{config_path} {path}.type must be 'row' or 'column'")
+
+    gap = int(raw.get("gap", 12))
+    children_raw = raw.get("children")
+    if not isinstance(children_raw, list) or not children_raw:
+        raise SystemExit(f"{config_path} {path}.children must be a non-empty list")
+
+    children: list[LayoutNode] = []
+    for index, item in enumerate(children_raw):
+        child_path = f"{path}.children[{index}]"
+        if not isinstance(item, dict):
+            raise SystemExit(f"{config_path} {child_path} must be a mapping")
+        child_type = item.get("type", "slider")
+        if child_type in {"row", "column"}:
+            children.append(parse_group(config_path=config_path, path=child_path, raw=item))
+        else:
+            children.append(parse_slider(item, config_path=config_path, path=child_path))
+    return GroupConfig(kind=kind, gap=gap, children=children)
+
+
+def parse_slider(raw: dict[str, Any], *, config_path: Path, path: str) -> SliderConfig:
+    try:
+        slider = SliderConfig(
+            name=str(raw["name"]),
+            channel=validate_range(int(raw["channel"]), 1, 16, f"{path}.channel", config_path),
+            control=validate_range(int(raw["control"]), 0, 127, f"{path}.control", config_path),
+            default=validate_range(int(raw.get("default", 0)), 0, 127, f"{path}.default", config_path),
+            minimum=validate_range(int(raw.get("min", 0)), 0, 127, f"{path}.min", config_path),
+            maximum=validate_range(int(raw.get("max", 127)), 0, 127, f"{path}.max", config_path),
+            orientation=str(raw.get("orientation", "horizontal")),
+            color=str(raw.get("color", "#d26a2e")),
+            width=int(raw["width"]) if "width" in raw else None,
+            height=int(raw["height"]) if "height" in raw else None,
+        )
+    except KeyError as exc:
+        missing = exc.args[0]
+        raise SystemExit(f"{config_path} {path} is missing '{missing}'") from exc
+
+    if slider.minimum > slider.maximum:
+        raise SystemExit(f"{config_path} {path} has min greater than max")
+    if not slider.minimum <= slider.default <= slider.maximum:
+        raise SystemExit(f"{config_path} {path} has default outside min/max range")
+    if slider.orientation not in {"horizontal", "vertical"}:
+        raise SystemExit(f"{config_path} {path}.orientation must be 'horizontal' or 'vertical'")
+    return slider
+
+
+def collect_sliders(node: LayoutNode) -> list[SliderConfig]:
+    if isinstance(node, SliderConfig):
+        return [node]
 
     sliders: list[SliderConfig] = []
-    for index, item in enumerate(slider_items, start=1):
-        if not isinstance(item, dict):
-            raise SystemExit(f"Slider #{index} in {config_path} must be a mapping")
-
-        try:
-            slider = SliderConfig(
-                name=str(item["name"]),
-                channel=validate_range(int(item["channel"]), 1, 16, "channel", index),
-                control=validate_range(int(item["control"]), 0, 127, "control", index),
-                default=validate_range(int(item.get("default", 0)), 0, 127, "default", index),
-                minimum=validate_range(int(item.get("min", 0)), 0, 127, "min", index),
-                maximum=validate_range(int(item.get("max", 127)), 0, 127, "max", index),
-            )
-        except KeyError as exc:
-            missing = exc.args[0]
-            raise SystemExit(f"Slider #{index} in {config_path} is missing '{missing}'") from exc
-
-        if slider.minimum > slider.maximum:
-            raise SystemExit(f"Slider #{index} in {config_path} has min greater than max")
-        if not slider.minimum <= slider.default <= slider.maximum:
-            raise SystemExit(
-                f"Slider #{index} in {config_path} has default outside min/max range"
-            )
-        sliders.append(slider)
-
-    return AppConfig(
-        title=title,
-        output=output.strip(),
-        sliders=sliders,
-        width=width,
-        height=height,
-    )
+    for child in node.children:
+        sliders.extend(collect_sliders(child))
+    return sliders
 
 
-def validate_range(value: int, minimum: int, maximum: int, field: str, index: int) -> int:
+def validate_range(value: int, minimum: int, maximum: int, field: str, config_path: Path) -> int:
     if minimum <= value <= maximum:
         return value
-    raise SystemExit(f"Slider #{index} field '{field}' must be between {minimum} and {maximum}")
+    raise SystemExit(f"{config_path} {field} must be between {minimum} and {maximum}")
 
 
 def load_state(state_path: Path) -> dict[str, int]:
@@ -529,6 +352,7 @@ class RuntimeState:
         self._config = config
         self._midi_out = midi_out
         self._state = load_state(state_path)
+        self._sliders_by_key = {slider.state_key: slider for slider in config.sliders}
         self._reconcile_state()
         self._file_mtime_ns = self._read_mtime_ns()
 
@@ -554,10 +378,7 @@ class RuntimeState:
     def update_slider_by_key(self, state_key: str, value: int) -> SliderConfig:
         self.reload_if_needed()
         with self.lock:
-            slider = next(
-                (item for item in self._config.sliders if item.state_key == state_key),
-                None,
-            )
+            slider = self._sliders_by_key.get(state_key)
             if slider is None:
                 raise ValueError(f"Unknown slider key: {state_key}")
             self._update_slider_locked(slider, value)
@@ -567,9 +388,25 @@ class RuntimeState:
         self.reload_if_needed()
         with self.lock:
             for slider in self._config.sliders:
-                self._update_slider_locked(
-                    slider, self._state.get(slider.state_key, slider.default)
-                )
+                self._update_slider_locked(slider, self._state.get(slider.state_key, slider.default))
+
+    def frontend_payload(self, *, hide_qr_panel: bool, port: int) -> dict[str, Any]:
+        self.reload_if_needed()
+        config = self.current_config()
+        lan_ip = detect_local_ip_address()
+        base_url = f"http://{lan_ip}:{port}/" if lan_ip else f"http://127.0.0.1:{port}/"
+        qr_url = f"{base_url}?noqr"
+        return {
+            "title": config.title,
+            "version": self.version(),
+            "layout": self._serialize_layout(config.layout),
+            "showQrPanel": not hide_qr_panel,
+            "qr": {
+                "url": qr_url,
+                "image": generate_qr_code_data_url(qr_url),
+            },
+            "reloadPollMs": RELOAD_POLL_MS,
+        }
 
     def reload_if_needed(self) -> bool:
         try:
@@ -590,8 +427,7 @@ class RuntimeState:
 
         new_midi_out = None
         with self.lock:
-            old_config = self._config
-            if new_config.output != old_config.output:
+            if new_config.output != self._config.output:
                 try:
                     new_midi_out = self._open_midi_output(new_config.output)
                 except SystemExit as exc:
@@ -603,18 +439,42 @@ class RuntimeState:
             if new_midi_out is not None:
                 self._midi_out = new_midi_out
             self._config = new_config
+            self._sliders_by_key = {slider.state_key: slider for slider in new_config.sliders}
             self._reconcile_state()
             self._file_mtime_ns = current_mtime_ns
             self._version += 1
             self._last_reload_error = None
             for slider in self._config.sliders:
-                self._update_slider_locked(
-                    slider, self._state.get(slider.state_key, slider.default)
-                )
+                self._update_slider_locked(slider, self._state.get(slider.state_key, slider.default))
 
         if new_midi_out is not None:
             old_midi_out.close()
         return True
+
+    def _serialize_layout(self, node: LayoutNode) -> dict[str, Any]:
+        if isinstance(node, SliderConfig):
+            value = self.get_slider_value(node)
+            return {
+                "type": "slider",
+                "key": node.state_key,
+                "name": node.name,
+                "value": value,
+                "channel": node.channel,
+                "control": node.control,
+                "min": node.minimum,
+                "max": node.maximum,
+                "orientation": node.orientation,
+                "color": node.color,
+                "width": node.width,
+                "height": node.height,
+                "label": self.format_slider_label(node, value),
+            }
+
+        return {
+            "type": node.kind,
+            "gap": node.gap,
+            "children": [self._serialize_layout(child) for child in node.children],
+        }
 
     def _reconcile_state(self) -> None:
         live_state: dict[str, int] = {}
@@ -647,8 +507,7 @@ class RuntimeState:
         except OSError as exc:
             available = ", ".join(mido.get_output_names()) or "none"
             raise SystemExit(
-                f"Could not open MIDI output '{output_name}'. "
-                f"Available outputs: {available}"
+                f"Could not open MIDI output '{output_name}'. Available outputs: {available}"
             ) from exc
 
     def _read_mtime_ns(self) -> int:
@@ -657,91 +516,3 @@ class RuntimeState:
     @staticmethod
     def format_slider_label(slider: SliderConfig, value: int) -> str:
         return f"{slider.name}: {value}"
-
-
-class MidiControllerTkApp:
-    def __init__(self, *, root: tk.Tk, runtime: RuntimeState) -> None:
-        self.root = root
-        self.runtime = runtime
-        self.container = ttk.Frame(self.root, padding=16)
-        self.container.pack(fill="both", expand=True)
-        self.variables: dict[str, tk.IntVar] = {}
-        self.label_variables: dict[str, tk.StringVar] = {}
-        self.content_frame: ttk.Frame | None = None
-        self.render()
-        self.schedule_reload_check()
-
-    def render(self) -> None:
-        config = self.runtime.current_config()
-        self.root.title(config.title)
-        self.root.geometry(f"{config.width}x{config.height}")
-        self.root.minsize(600, 280)
-
-        if self.content_frame is not None:
-            self.content_frame.destroy()
-
-        self.content_frame = ttk.Frame(self.container)
-        self.content_frame.pack(fill="both", expand=True)
-        self.variables = {}
-        self.label_variables = {}
-
-        title = ttk.Label(self.content_frame, text=config.title, font=("Helvetica", 20, "bold"))
-        title.pack(anchor="w", pady=(0, 12))
-
-        sliders_frame = ttk.Frame(self.content_frame)
-        sliders_frame.pack(fill="both", expand=True)
-        sliders_frame.columnconfigure(0, weight=1)
-
-        for row, slider in enumerate(config.sliders):
-            current_value = self.runtime.get_slider_value(slider)
-            value_var = tk.IntVar(value=current_value)
-            self.variables[slider.state_key] = value_var
-            label_var = tk.StringVar(
-                value=self.runtime.format_slider_label(slider, current_value)
-            )
-            self.label_variables[slider.state_key] = label_var
-
-            card = ttk.Frame(sliders_frame, padding=(12, 10))
-            card.grid(row=row, column=0, sticky="ew", pady=6)
-            card.columnconfigure(0, weight=1)
-
-            header = ttk.Frame(card)
-            header.grid(row=0, column=0, sticky="ew", pady=(0, 8))
-            header.columnconfigure(0, weight=1)
-
-            label = ttk.Label(header, textvariable=label_var, anchor="w", font=("Helvetica", 13))
-            label.grid(row=0, column=0, sticky="w")
-
-            meta = ttk.Label(
-                header,
-                text=f"CH {slider.channel}  CC {slider.control}",
-                foreground="#666666",
-            )
-            meta.grid(row=0, column=1, sticky="e")
-
-            scale = tk.Scale(
-                card,
-                from_=slider.minimum,
-                to=slider.maximum,
-                orient=tk.HORIZONTAL,
-                variable=value_var,
-                resolution=1,
-                showvalue=False,
-                command=lambda raw, slider=slider: self.on_slider_change(slider, raw),
-                length=720,
-                sliderlength=28,
-                width=24,
-            )
-            scale.grid(row=1, column=0, sticky="ew")
-
-    def on_slider_change(self, slider: SliderConfig, raw_value: Any) -> None:
-        value = int(float(raw_value))
-        self.runtime.update_slider_by_key(slider.state_key, value)
-        self.label_variables[slider.state_key].set(
-            self.runtime.format_slider_label(slider, value)
-        )
-
-    def schedule_reload_check(self) -> None:
-        if self.runtime.reload_if_needed():
-            self.render()
-        self.root.after(RELOAD_POLL_MS, self.schedule_reload_check)

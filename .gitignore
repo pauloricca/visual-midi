@@ -18,6 +18,7 @@ venv/
 .ruff_cache/
 .coverage
 .python-version
+node_modules/
 
 # macOS / editor noise
 .DS_Store

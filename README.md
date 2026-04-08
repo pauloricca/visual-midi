@@ -1,65 +1,79 @@
 # visual-midi
 
-A small `uv`-managed Python app that renders a slider-based MIDI controller UI from YAML files.
-
-## What it does
-
-- Loads a UI definition from `configs/<name>.yaml`
-- Opens the configured MIDI output device
-- Restores the last saved value for every slider
-- Sends every current slider value as MIDI CC on startup
-- Sends and persists changes whenever you move a slider
+`visual-midi` is now a web-first `uv` Python app. It loads a YAML controller definition, opens the configured MIDI output, restores saved state, sends all slider values on startup, and serves a browser UI that hot-reloads when the YAML changes.
 
 ## Run
 
 ```bash
+uv sync
 uv run visual-midi demo
 ```
 
-```bash
-uv run visual-midi demo --web
-```
+The CLI argument is the config name without `.yaml`, so `demo` loads `configs/demo.yaml`.
 
-The argument is the YAML file name without the `.yaml` suffix. The app looks for:
+The server prefers port `8765` on each run and falls back to a random free port if that one is busy. It opens the default browser automatically and exposes the UI on your local network. The QR code at the bottom points to a `?noqr` URL so the phone view hides the QR panel.
 
-```text
-configs/demo.yaml
-```
+## Config format
 
-`--web` starts a local HTTP server, opens your default browser to it, and renders the same controller layout in the browser instead of Tk.
-It also shows a QR code at the bottom of the page for the detected local network URL so you can open it from your phone on the same Wi-Fi network.
-The web server reuses port `8765` across runs unless that port is already in use.
-
-## Install dependencies
-
-```bash
-uv sync
-```
-
-## YAML format
+Configs stay in YAML, but the backend normalizes them into JSON for the browser UI. You can keep the old flat `sliders:` list, or use nested `layout` groups for rows and columns.
 
 ```yaml
 title: Demo Controller
-window:
-  width: 900
-  height: 420
 output: IAC Driver Bus 1
-sliders:
-  - name: Filter Cutoff
-    channel: 1
-    control: 74
-    default: 64
-  - name: Resonance
-    channel: 1
-    control: 71
-    default: 32
+layout:
+  type: column
+  gap: 16
+  children:
+    - type: row
+      gap: 16
+      children:
+        - name: Filter Cutoff
+          channel: 1
+          control: 74
+          default: 64
+          color: "#d26a2e"
+        - name: Resonance
+          channel: 1
+          control: 71
+          default: 32
+          color: "#5f8f6b"
+    - type: row
+      gap: 20
+      children:
+        - name: Attack
+          channel: 1
+          control: 73
+          default: 20
+          orientation: vertical
+          height: 260
+        - name: Release
+          channel: 1
+          control: 72
+          default: 80
+          orientation: vertical
+          height: 260
 ```
+
+Supported slider fields:
+
+- `name`
+- `channel` from `1` to `16`
+- `control` from `0` to `127`
+- `default`, `min`, `max`
+- `orientation`: `horizontal` or `vertical`
+- `color`: any CSS color string
+- `width`, `height`: optional pixel sizes for the control container
+
+Supported layout group fields:
+
+- `type`: `row` or `column`
+- `gap`: spacing between children in pixels
+- `children`: nested groups or sliders
 
 ## Notes
 
-- `channel` is a standard MIDI channel number from `1` to `16`
-- `control` is the MIDI CC number from `0` to `127`
-- Slider values are saved in `~/.visual-midi/states/<config-name>.json`
-- If the configured device cannot be opened, the app shows the available MIDI outputs in the error message
-- Web mode binds on your local network so other devices on the same network can reach it
-- Editing the YAML file triggers an automatic reload for both the Tk window and the web UI
+- Slider state is saved in `~/.visual-midi/states/<config-name>.json`
+- YAML edits are watched and trigger UI reload plus MIDI state resend
+- The frontend is served from separate static files under [src/visual_midi/web](/Users/pauloricca/Desktop/projects/visual-midi/src/visual_midi/web)
+- The backend exposes normalized config/state data over JSON endpoints instead of building HTML in Python
+- The frontend is intentionally framework-free for now, but the repo is pinned to `pnpm` if you decide to add TypeScript tooling later

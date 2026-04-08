@@ -1,0 +1,9 @@
+{
+  "name": "visual-midi",
+  "private": true,
+  "packageManager": "pnpm@10.0.0",
+  "scripts": {
+    "dev": "echo \"Frontend is served directly by the Python app right now.\"",
+    "build": "echo \"No frontend build step is configured yet.\""
+  }
+}
