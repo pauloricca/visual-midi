@@ -51,50 +51,139 @@ function renderLayout(node) {
 function renderSlider(node) {
   const wrapper = document.createElement("article");
   wrapper.className = `control control--${node.orientation}`;
+  wrapper.dataset.key = node.key;
   applyNodeSizing(wrapper, node);
+  wrapper.style.setProperty("--accent", node.color || "#d26a2e");
 
-  const header = document.createElement("div");
-  header.className = "control-header";
+  const fill = document.createElement("div");
+  fill.className = "control-fill";
 
-  const label = document.createElement("label");
-  label.className = "control-label";
-  label.htmlFor = node.key;
-  label.textContent = node.label;
+  const chrome = document.createElement("div");
+  chrome.className = "control-chrome";
+
+  const top = document.createElement("div");
+  top.className = "control-topline";
+
+  const title = document.createElement("div");
+  title.className = "control-title";
 
   const meta = document.createElement("div");
   meta.className = "control-meta";
   meta.textContent = `CH ${node.channel}  CC ${node.control}`;
 
-  header.append(label, meta);
+  chrome.append(meta, title);
+  wrapper.append(fill, chrome);
 
-  const input = document.createElement("input");
-  input.className = "control-slider";
-  input.id = node.key;
-  input.type = "range";
-  input.min = String(node.min);
-  input.max = String(node.max);
-  input.step = "1";
-  input.value = String(node.value);
-  input.style.setProperty("--accent", node.color || "#d26a2e");
-  if (node.orientation === "vertical") {
-    input.classList.add("control-slider--vertical");
-  }
+  const state = {
+    ...node,
+    element: wrapper,
+    fill,
+    title,
+    pendingRequest: false,
+    queuedValue: null,
+    dragStartX: 0,
+    dragStartY: 0,
+    dragStartValue: node.value,
+  };
 
-  input.addEventListener("input", async () => {
-    const value = Number(input.value);
-    label.textContent = `${node.name}: ${value}`;
-    try {
-      await fetch("/api/slider", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key: node.key, value }),
-      });
-    } catch (_error) {
+  updateSliderVisuals(state, node.value);
+
+  wrapper.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    state.dragStartX = event.clientX;
+    state.dragStartY = event.clientY;
+    state.dragStartValue = state.value;
+    wrapper.setPointerCapture(event.pointerId);
+  });
+
+  wrapper.addEventListener("pointermove", (event) => {
+    if (!wrapper.hasPointerCapture(event.pointerId)) {
+      return;
+    }
+    event.preventDefault();
+    updateFromPointer(state, event);
+  });
+
+  wrapper.addEventListener("pointerup", (event) => {
+    if (wrapper.hasPointerCapture(event.pointerId)) {
+      wrapper.releasePointerCapture(event.pointerId);
     }
   });
 
-  wrapper.append(header, input);
+  wrapper.addEventListener("pointercancel", (event) => {
+    if (wrapper.hasPointerCapture(event.pointerId)) {
+      wrapper.releasePointerCapture(event.pointerId);
+    }
+  });
+
   return wrapper;
+}
+
+function updateFromPointer(state, event) {
+  const rect = state.element.getBoundingClientRect();
+  const travel =
+    state.orientation === "vertical"
+      ? -((event.clientY - state.dragStartY) / (rect.height || 1))
+      : (event.clientX - state.dragStartX) / (rect.width || 1);
+  const rawValue = state.dragStartValue + travel * (state.max - state.min);
+  const nextValue = Math.round(rawValue);
+  const boundedValue = clamp(nextValue, state.min, state.max);
+  if (boundedValue === state.value) {
+    return;
+  }
+
+  updateSliderVisuals(state, boundedValue);
+  queueSliderUpdate(state, boundedValue);
+}
+
+function updateSliderVisuals(state, value) {
+  state.value = value;
+  const percentage = ((value - state.min) / (state.max - state.min || 1)) * 100;
+  state.title.textContent = state.name;
+
+  if (state.orientation === "vertical") {
+    state.fill.style.height = `${percentage}%`;
+    state.fill.style.width = "100%";
+  } else {
+    state.fill.style.width = `${percentage}%`;
+    state.fill.style.height = "100%";
+  }
+}
+
+function queueSliderUpdate(state, value) {
+  state.queuedValue = value;
+  if (state.pendingRequest) {
+    return;
+  }
+  void flushSliderUpdate(state);
+}
+
+async function flushSliderUpdate(state) {
+  if (state.queuedValue === null) {
+    return;
+  }
+
+  state.pendingRequest = true;
+  const value = state.queuedValue;
+  state.queuedValue = null;
+
+  try {
+    await fetch("/api/slider", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: state.key, value }),
+    });
+  } catch (_error) {
+  } finally {
+    state.pendingRequest = false;
+    if (state.queuedValue !== null && state.queuedValue !== value) {
+      void flushSliderUpdate(state);
+    }
+  }
+}
+
+function clamp(value, minimum, maximum) {
+  return Math.min(maximum, Math.max(minimum, value));
 }
 
 function applyNodeSizing(element, node) {

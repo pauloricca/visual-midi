@@ -20,30 +20,33 @@ Configs stay in YAML, but the backend normalizes them into JSON for the browser 
 ```yaml
 title: Demo Controller
 output: IAC Driver Bus 1
+palette:
+  orange: "#d26a2e"
+  moss: "#5f8f6b"
 columns:
   - rows:
       - name: Freq
         channel: 1
         control: 74
         default: 64
-        color: "#d26a2e"
+        color: orange
         height: 70%
       - name: LFO Freq
         channel: 1
         control: 75
         default: 32
-        color: "#5f8f6b"
+        color: moss
   - rows:
       - name: Freq 2
         channel: 1
         control: 74
         default: 64
-        color: "#d26a2e"
+        color: orange
       - name: LFO Freq 2
         channel: 1
         control: 75
         default: 32
-        color: "#5f8f6b"
+        color: moss
 ```
 
 The layout fills the available UI area as a mosaic:
@@ -60,7 +63,7 @@ Supported slider fields:
 - `control` from `0` to `127`
 - `default`, `min`, `max`
 - `orientation`: `horizontal` or `vertical`
-- `color`: any CSS color string
+- `color`: any CSS color string or a name from the root `palette`
 - `width`, `height`: optional `%` or `px` sizes for the control tile
 
 Supported layout group fields:
@@ -68,6 +71,10 @@ Supported layout group fields:
 - `rows`
 - `columns`
 - `width`, `height`: optional `%` or `px` sizes for the container tile
+
+Optional root fields:
+
+- `palette`: a mapping of color names to CSS color strings
 
 ## Notes
 

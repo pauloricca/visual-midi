@@ -44,7 +44,7 @@ class SliderConfig:
     default: int = 0
     minimum: int = 0
     maximum: int = 127
-    orientation: str = "horizontal"
+    orientation: str = "vertical"
     color: str = "#d26a2e"
     width: SizeSpec | None = None
     height: SizeSpec | None = None
@@ -243,7 +243,8 @@ def load_config(config_path: Path) -> AppConfig:
     if not isinstance(output, str) or not output.strip():
         raise SystemExit(f"Config {config_path} must define a non-empty 'output'")
 
-    layout = parse_root_layout(raw=raw, config_path=config_path)
+    palette = parse_palette(raw.get("palette"), config_path=config_path)
+    layout = parse_root_layout(raw=raw, config_path=config_path, palette=palette)
     sliders = collect_sliders(layout)
     if not sliders:
         raise SystemExit(f"Config {config_path} must contain at least one slider")
@@ -251,7 +252,25 @@ def load_config(config_path: Path) -> AppConfig:
     return AppConfig(title=title, output=output.strip(), layout=layout, sliders=sliders)
 
 
-def parse_root_layout(*, raw: dict[str, Any], config_path: Path) -> GroupConfig:
+def parse_palette(raw: Any, *, config_path: Path) -> dict[str, str]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise SystemExit(f"Config {config_path} palette must be a mapping of names to colors")
+
+    palette: dict[str, str] = {}
+    for key, value in raw.items():
+        if not isinstance(key, str) or not key.strip():
+            raise SystemExit(f"Config {config_path} palette keys must be non-empty strings")
+        if not isinstance(value, str) or not value.strip():
+            raise SystemExit(f"Config {config_path} palette value for '{key}' must be a non-empty string")
+        palette[key.strip()] = value.strip()
+    return palette
+
+
+def parse_root_layout(
+    *, raw: dict[str, Any], config_path: Path, palette: dict[str, str]
+) -> GroupConfig:
     container_keys = [key for key in ("rows", "columns") if key in raw]
     if len(container_keys) != 1:
         raise SystemExit(f"Config {config_path} must define exactly one of 'rows' or 'columns'")
@@ -262,6 +281,7 @@ def parse_root_layout(*, raw: dict[str, Any], config_path: Path) -> GroupConfig:
         config_path=config_path,
         path=key,
         raw=raw,
+        palette=palette,
     )
 
 
@@ -272,6 +292,7 @@ def parse_group(
     config_path: Path,
     path: str,
     raw: dict[str, Any],
+    palette: dict[str, str],
 ) -> GroupConfig:
     if not isinstance(children_raw, list) or not children_raw:
         raise SystemExit(f"{config_path} {path} must be a non-empty list")
@@ -297,10 +318,13 @@ def parse_group(
                     config_path=config_path,
                     path=f"{child_path}.{child_key}",
                     raw=item,
+                    palette=palette,
                 )
             )
         else:
-            children.append(parse_slider(item, config_path=config_path, path=child_path))
+            children.append(
+                parse_slider(item, config_path=config_path, path=child_path, palette=palette)
+            )
 
     return GroupConfig(
         kind=kind,
@@ -310,7 +334,9 @@ def parse_group(
     )
 
 
-def parse_slider(raw: dict[str, Any], *, config_path: Path, path: str) -> SliderConfig:
+def parse_slider(
+    raw: dict[str, Any], *, config_path: Path, path: str, palette: dict[str, str]
+) -> SliderConfig:
     try:
         slider = SliderConfig(
             name=str(raw["name"]),
@@ -319,8 +345,8 @@ def parse_slider(raw: dict[str, Any], *, config_path: Path, path: str) -> Slider
             default=validate_range(int(raw.get("default", 0)), 0, 127, f"{path}.default", config_path),
             minimum=validate_range(int(raw.get("min", 0)), 0, 127, f"{path}.min", config_path),
             maximum=validate_range(int(raw.get("max", 127)), 0, 127, f"{path}.max", config_path),
-            orientation=str(raw.get("orientation", "horizontal")),
-            color=str(raw.get("color", "#d26a2e")),
+            orientation=str(raw.get("orientation", "vertical")),
+            color=resolve_color(raw.get("color", "#d26a2e"), palette=palette, config_path=config_path, path=f"{path}.color"),
             width=parse_size(raw.get("width"), config_path=config_path, path=f"{path}.width"),
             height=parse_size(raw.get("height"), config_path=config_path, path=f"{path}.height"),
         )
@@ -335,6 +361,15 @@ def parse_slider(raw: dict[str, Any], *, config_path: Path, path: str) -> Slider
     if slider.orientation not in {"horizontal", "vertical"}:
         raise SystemExit(f"{config_path} {path}.orientation must be 'horizontal' or 'vertical'")
     return slider
+
+
+def resolve_color(
+    raw: Any, *, palette: dict[str, str], config_path: Path, path: str
+) -> str:
+    if not isinstance(raw, str) or not raw.strip():
+        raise SystemExit(f"{config_path} {path} must be a non-empty color string")
+    color = raw.strip()
+    return palette.get(color, color)
 
 
 def parse_size(value: Any, *, config_path: Path, path: str) -> SizeSpec | None:

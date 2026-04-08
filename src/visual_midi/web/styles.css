@@ -22,7 +22,7 @@ body {
 body {
   margin: 0;
   font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
-  background: linear-gradient(180deg, #f7f4ee 0%, var(--bg) 100%);
+  background: black;
   color: var(--text);
   min-height: 100vh;
   min-height: 100svh;
@@ -37,7 +37,6 @@ body {
   height: var(--app-height);
   display: flex;
   flex-direction: column;
-  padding: 16px;
   gap: 16px;
   overflow: hidden;
 }
@@ -46,6 +45,7 @@ body {
   margin: 0;
   font-size: 2rem;
   line-height: 1.1;
+  color: white;
 }
 
 .layout-panel {
@@ -53,10 +53,6 @@ body {
   min-height: 0;
   display: flex;
   background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 16px;
-  box-shadow: var(--shadow);
   overflow: hidden;
 }
 
@@ -105,10 +101,14 @@ body {
 .control {
   min-width: 0;
   min-height: 0;
-  background: color-mix(in srgb, var(--panel) 92%, white);
-  padding: 14px;
+  background: color-mix(in srgb, var(--accent) 50%, white);
+  position: relative;
+  overflow: hidden;
   display: flex;
-  flex-direction: column;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  border: 2px solid black;
 }
 
 .control--horizontal {
@@ -119,81 +119,45 @@ body {
   height: 100%;
 }
 
-.control-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 12px;
-  margin-bottom: 8px;
+.control-fill {
+  position: absolute;
+  inset: auto auto 0 0;
+  width: 0;
+  height: 100%;
+  background: color-mix(in srgb, var(--accent) 86%, white);
 }
 
-.control-label {
-  font-size: 1rem;
+.control--vertical .control-fill {
+  width: 100%;
+  height: 0;
+}
+
+.control-chrome {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  width: 100%;
+  height: 100%;
+  padding: 16px 18px;
+}
+
+.control-title {
+  font-size: clamp(1rem, 2vw, 1.7rem);
   font-weight: 600;
+  line-height: 1;
+  align-self: flex-start;
 }
 
 .control-meta {
-  color: var(--muted);
-  font-size: 0.95rem;
+  color: black;
+  opacity: 0.3;
+  font-size: clamp(0.7rem, 1.1vw, 0.95rem);
+  line-height: 1;
   white-space: nowrap;
-}
-
-.control-slider {
-  --accent: #d26a2e;
-  -webkit-appearance: none;
-  appearance: none;
-  width: 100%;
-  height: 44px;
-  margin: 0;
-  background: transparent;
-  touch-action: pan-x;
-}
-
-.control-slider:focus {
-  outline: none;
-}
-
-.control-slider::-webkit-slider-runnable-track {
-  height: 10px;
-  background: color-mix(in srgb, var(--accent) 28%, white);
-  border-radius: 999px;
-}
-
-.control-slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 34px;
-  height: 34px;
-  margin-top: -12px;
-  border-radius: 50%;
-  border: 2px solid color-mix(in srgb, var(--accent) 70%, black);
-  background: var(--accent);
-  box-shadow: 0 4px 10px color-mix(in srgb, var(--accent) 35%, transparent);
-}
-
-.control-slider::-moz-range-track {
-  height: 10px;
-  background: color-mix(in srgb, var(--accent) 28%, white);
-  border-radius: 999px;
-}
-
-.control-slider::-moz-range-thumb {
-  width: 34px;
-  height: 34px;
-  border: 2px solid color-mix(in srgb, var(--accent) 70%, black);
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 4px 10px color-mix(in srgb, var(--accent) 35%, transparent);
-}
-
-.control-slider--vertical {
-  writing-mode: vertical-lr;
-  direction: rtl;
-  width: 44px;
-  min-height: 0;
-  height: 100%;
-  align-self: center;
-  touch-action: pan-y;
+  margin-bottom: 8px;
+  align-self: flex-start;
 }
 
 .qr-panel {
@@ -201,7 +165,6 @@ body {
   padding: 18px 16px;
   background: rgba(255, 253, 248, 0.72);
   border: 1px solid var(--border);
-  border-radius: 14px;
   box-shadow: var(--shadow);
   display: flex;
   align-items: center;
