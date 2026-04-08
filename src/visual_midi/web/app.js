@@ -10,7 +10,7 @@ let currentVersion = null;
 const INERTIA_VELOCITY_THRESHOLD = 80;
 const INERTIA_FRICTION_PER_FRAME = 0.9;
 const INERTIA_MIN_VELOCITY = 8;
-const WHEEL_STEP_SCALE = 0.18;
+const WHEEL_STEP_SCALE = 0.72;
 
 function shouldHideQrPanel() {
   return new URLSearchParams(window.location.search).has("noqr");
@@ -75,7 +75,7 @@ function renderSlider(node) {
 
   const meta = document.createElement("div");
   meta.className = "control-meta";
-  meta.textContent = `CH ${node.channel}  CC ${node.control}`;
+  meta.textContent = buildSliderMeta(node);
 
   chrome.append(meta, title);
   wrapper.append(fill, chrome);
@@ -139,11 +139,24 @@ function renderSlider(node) {
     (event) => {
       event.preventDefault();
       stopInertia(state);
-      const dominantDelta =
-        Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
-      const direction = dominantDelta > 0 ? 1 : -1;
-      const step = Math.max(1, Math.round((state.max - state.min) * WHEEL_STEP_SCALE * 0.01));
-      const nextValue = clamp(state.value + direction * step, state.min, state.max);
+      const axisDelta = state.orientation === "vertical" ? event.deltaY : event.deltaX;
+      if (axisDelta === 0) {
+        return;
+      }
+      const direction =
+        state.orientation === "vertical"
+          ? axisDelta > 0
+            ? 1
+            : -1
+          : axisDelta > 0
+            ? -1
+            : 1;
+      const speed = state.speed || 1;
+      const nextValue = clamp(
+        state.value + ((state.max - state.min) * WHEEL_STEP_SCALE * 0.01) * speed * direction,
+        state.min,
+        state.max
+      );
       if (nextValue === state.value) {
         return;
       }
@@ -158,13 +171,13 @@ function renderSlider(node) {
 
 function updateFromPointer(state, event, now) {
   const rect = state.element.getBoundingClientRect();
+  const speed = state.speed || 1;
   const travel =
     state.orientation === "vertical"
       ? -((event.clientY - state.dragStartY) / (rect.height || 1))
       : (event.clientX - state.dragStartX) / (rect.width || 1);
-  const rawValue = state.dragStartValue + travel * (state.max - state.min);
-  const nextValue = Math.round(rawValue);
-  const boundedValue = clamp(nextValue, state.min, state.max);
+  const rawValue = state.dragStartValue + travel * (state.max - state.min) * speed;
+  const boundedValue = clamp(rawValue, state.min, state.max);
   if (boundedValue === state.value) {
     updateVelocity(state, event, now, rect);
     return;
@@ -189,6 +202,15 @@ function updateSliderVisuals(state, value) {
   }
 }
 
+function buildSliderMeta(node) {
+  const parts = [`CH ${node.channel}  CC ${node.control}`];
+  if (node.osc) {
+    parts.push(`OSC ${node.osc.path}`);
+    parts.push(`OSC Range ${node.osc.min}..${node.osc.max}`);
+  }
+  return parts.join("\n");
+}
+
 function queueSliderUpdate(state, value) {
   state.queuedValue = value;
   if (state.pendingRequest) {
@@ -198,13 +220,13 @@ function queueSliderUpdate(state, value) {
 }
 
 function updateVelocity(state, event, now, rect) {
+  const speed = state.speed || 1;
   const pointerDelta =
     state.orientation === "vertical"
       ? -(event.clientY - state.lastPointerY) / (rect.height || 1)
       : (event.clientX - state.lastPointerX) / (rect.width || 1);
   const timeDelta = Math.max(now - state.lastPointerTime, 1);
-  const instantVelocity =
-    (pointerDelta * (state.max - state.min) * 1000) / timeDelta;
+  const instantVelocity = ((pointerDelta * (state.max - state.min) * speed) * 1000) / timeDelta;
   state.velocity = state.velocity * 0.35 + instantVelocity * 0.65;
   state.lastPointerX = event.clientX;
   state.lastPointerY = event.clientY;
@@ -224,11 +246,7 @@ function maybeStartInertia(state) {
     const elapsed = Math.max(now - previousTime, 1);
     previousTime = now;
 
-    const nextValue = clamp(
-      Math.round(state.value + (state.velocity * elapsed) / 1000),
-      state.min,
-      state.max
-    );
+    const nextValue = clamp(state.value + (state.velocity * elapsed) / 1000, state.min, state.max);
 
     if (nextValue !== state.value) {
       updateSliderVisuals(state, nextValue);

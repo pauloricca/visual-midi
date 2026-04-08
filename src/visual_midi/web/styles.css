@@ -156,8 +156,8 @@ body {
   color: black;
   opacity: 0.3;
   font-size: clamp(0.7rem, 1.1vw, 0.95rem);
-  line-height: 1;
-  white-space: nowrap;
+  line-height: 1.15;
+  white-space: pre-line;
   margin-bottom: 8px;
   align-self: flex-start;
 }
