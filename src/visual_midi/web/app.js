@@ -11,6 +11,7 @@ const INERTIA_VELOCITY_THRESHOLD = 80;
 const INERTIA_FRICTION_PER_FRAME = 0.9;
 const INERTIA_MIN_VELOCITY = 8;
 const WHEEL_STEP_SCALE = 0.72;
+const WHEEL_DELTA_UNIT = 12;
 
 function shouldHideQrPanel() {
   return new URLSearchParams(window.location.search).has("noqr");
@@ -38,20 +39,6 @@ async function fetchVersion() {
     throw new Error(`Version request failed: ${response.status}`);
   }
   return response.json();
-}
-
-function renderLayout(node) {
-  if (node.type === "slider") {
-    return renderSlider(node);
-  }
-
-  const group = document.createElement("section");
-  group.className = `layout-group layout-group--${node.type}`;
-  applyNodeSizing(group, node);
-  for (const child of node.children) {
-    group.appendChild(renderLayout(child));
-  }
-  return group;
 }
 
 function renderSlider(node) {
@@ -95,9 +82,10 @@ function renderSlider(node) {
     lastPointerTime: 0,
     velocity: 0,
     inertiaFrame: null,
+    wheelRemainder: 0,
   };
 
-  updateSliderVisuals(state, node.value);
+  updateSliderVisuals(state, quantizeSliderValue(state, node.value));
 
   wrapper.addEventListener("pointerdown", (event) => {
     event.preventDefault();
@@ -143,19 +131,14 @@ function renderSlider(node) {
       if (axisDelta === 0) {
         return;
       }
-      const direction =
-        state.orientation === "vertical"
-          ? axisDelta > 0
-            ? 1
-            : -1
-          : axisDelta > 0
-            ? -1
-            : 1;
-      const speed = state.speed || 1;
-      const nextValue = clamp(
-        state.value + ((state.max - state.min) * WHEEL_STEP_SCALE * 0.01) * speed * direction,
-        state.min,
-        state.max
+      const normalizedDelta = normalizeWheelDelta(event, axisDelta);
+      const valueDelta = computeWheelValueDelta(state, normalizedDelta);
+      if (valueDelta === 0) {
+        return;
+      }
+      const nextValue = quantizeSliderValue(
+        state,
+        clamp(state.value + valueDelta, state.min, state.max)
       );
       if (nextValue === state.value) {
         return;
@@ -177,7 +160,7 @@ function updateFromPointer(state, event, now) {
       ? -((event.clientY - state.dragStartY) / (rect.height || 1))
       : (event.clientX - state.dragStartX) / (rect.width || 1);
   const rawValue = state.dragStartValue + travel * (state.max - state.min) * speed;
-  const boundedValue = clamp(rawValue, state.min, state.max);
+  const boundedValue = quantizeSliderValue(state, clamp(rawValue, state.min, state.max));
   if (boundedValue === state.value) {
     updateVelocity(state, event, now, rect);
     return;
@@ -246,7 +229,10 @@ function maybeStartInertia(state) {
     const elapsed = Math.max(now - previousTime, 1);
     previousTime = now;
 
-    const nextValue = clamp(state.value + (state.velocity * elapsed) / 1000, state.min, state.max);
+    const nextValue = quantizeSliderValue(
+      state,
+      clamp(state.value + (state.velocity * elapsed) / 1000, state.min, state.max)
+    );
 
     if (nextValue !== state.value) {
       updateSliderVisuals(state, nextValue);
@@ -303,6 +289,57 @@ function clamp(value, minimum, maximum) {
   return Math.min(maximum, Math.max(minimum, value));
 }
 
+function quantizeSliderValue(state, value) {
+  const bounded = clamp(value, state.min, state.max);
+  if (!state.steps) {
+    return bounded;
+  }
+  if (state.max === state.min) {
+    return state.min;
+  }
+
+  const stepSize = (state.max - state.min) / (state.steps - 1);
+  const stepIndex = Math.round((bounded - state.min) / stepSize);
+  return clamp(state.min + stepIndex * stepSize, state.min, state.max);
+}
+
+function normalizeWheelDelta(event, axisDelta) {
+  if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) {
+    return axisDelta * 16;
+  }
+  if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
+    return axisDelta * window.innerHeight;
+  }
+  return axisDelta;
+}
+
+function computeWheelValueDelta(state, normalizedDelta) {
+  const directionMultiplier =
+    normalizedDelta > 0
+      ? state.orientation === "vertical"
+        ? 1
+        : -1
+      : state.orientation === "vertical"
+        ? -1
+        : 1;
+
+  if (state.steps) {
+    state.wheelRemainder += Math.abs(normalizedDelta);
+    const stepCount = Math.floor(state.wheelRemainder / WHEEL_DELTA_UNIT);
+    if (stepCount === 0) {
+      return 0;
+    }
+    state.wheelRemainder -= stepCount * WHEEL_DELTA_UNIT;
+    const stepSize = (state.max - state.min) / (state.steps - 1);
+    return stepSize * stepCount * directionMultiplier;
+  }
+
+  const speed = state.speed || 1;
+  const baseStep = ((state.max - state.min) * WHEEL_STEP_SCALE * 0.01) * speed;
+  const magnitude = Math.max(1, Math.abs(normalizedDelta) / WHEEL_DELTA_UNIT);
+  return Math.max(1, Math.round(baseStep * magnitude)) * directionMultiplier;
+}
+
 function applyNodeSizing(element, node) {
   if (node.width) {
     element.dataset.width = node.width;
@@ -347,6 +384,9 @@ function renderLayoutWithConfig(node, payload) {
   if (node.type === "slider") {
     return renderSlider({ ...node, inertia: payload.inertia });
   }
+  if (node.type === "tabs") {
+    return renderTabs(node, payload);
+  }
 
   const group = document.createElement("section");
   group.className = `layout-group layout-group--${node.type}`;
@@ -355,6 +395,66 @@ function renderLayoutWithConfig(node, payload) {
     group.appendChild(renderLayoutWithConfig(child, payload));
   }
   return group;
+}
+
+function renderTabs(node, payload) {
+  const tabs = document.createElement("section");
+  tabs.className = "layout-tabs";
+  applyNodeSizing(tabs, node);
+
+  const nav = document.createElement("div");
+  nav.className = "layout-tabs-nav";
+  nav.setAttribute("role", "tablist");
+
+  const viewport = document.createElement("div");
+  viewport.className = "layout-tabs-viewport";
+
+  const track = document.createElement("div");
+  track.className = "layout-tabs-track";
+  const panelWidthPercent = 100 / node.tabs.length;
+  track.style.width = `${node.tabs.length * 100}%`;
+  viewport.appendChild(track);
+
+  let activeIndex = 0;
+  const buttons = [];
+
+  const syncActiveTab = () => {
+    track.style.transform = `translateX(-${activeIndex * panelWidthPercent}%)`;
+    buttons.forEach((button, index) => {
+      const isActive = index === activeIndex;
+      button.classList.toggle("is-active", isActive);
+      button.setAttribute("aria-selected", String(isActive));
+      button.tabIndex = isActive ? 0 : -1;
+      panels[index].setAttribute("aria-hidden", String(!isActive));
+    });
+  };
+
+  const panels = [];
+  node.tabs.forEach((tab, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "layout-tab-button";
+    button.textContent = tab.name;
+    button.setAttribute("role", "tab");
+    button.addEventListener("click", () => {
+      activeIndex = index;
+      syncActiveTab();
+    });
+    nav.appendChild(button);
+    buttons.push(button);
+
+    const panel = document.createElement("section");
+    panel.className = "layout-tab-panel";
+    panel.setAttribute("role", "tabpanel");
+    panel.style.flexBasis = `${panelWidthPercent}%`;
+    panel.appendChild(renderLayoutWithConfig(tab.content, payload));
+    track.appendChild(panel);
+    panels.push(panel);
+  });
+
+  tabs.append(nav, viewport);
+  syncActiveTab();
+  return tabs;
 }
 
 let pollTimer = null;

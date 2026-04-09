@@ -39,6 +39,18 @@ class SizeSpec:
 
 
 @dataclass(frozen=True)
+class LayoutDefaults:
+    channel: int = 1
+    default: int = 0
+    minimum: int = 0
+    maximum: int = 127
+    steps: int | None = None
+    speed: float = 1.0
+    orientation: str = "vertical"
+    color: str = "#d26a2e"
+
+
+@dataclass(frozen=True)
 class SliderConfig:
     name: str
     channel: int
@@ -46,6 +58,7 @@ class SliderConfig:
     default: int = 0
     minimum: int = 0
     maximum: int = 127
+    steps: int | None = None
     speed: float = 1.0
     orientation: str = "vertical"
     color: str = "#d26a2e"
@@ -66,7 +79,20 @@ class GroupConfig:
     height: SizeSpec | None = None
 
 
-LayoutNode = Union[SliderConfig, GroupConfig]
+@dataclass(frozen=True)
+class TabConfig:
+    name: str
+    content: "LayoutNode"
+
+
+@dataclass(frozen=True)
+class TabsConfig:
+    tabs: list[TabConfig]
+    width: SizeSpec | None = None
+    height: SizeSpec | None = None
+
+
+LayoutNode = Union[SliderConfig, GroupConfig, TabsConfig]
 
 
 @dataclass(frozen=True)
@@ -74,7 +100,7 @@ class AppConfig:
     title: str | None
     output: str
     inertia: float
-    layout: GroupConfig
+    layout: LayoutNode
     sliders: list[SliderConfig]
     osc: "OscOutputConfig | None" = None
 
@@ -332,18 +358,52 @@ def parse_osc_output(raw: Any, *, config_path: Path) -> OscOutputConfig | None:
 
 def parse_root_layout(
     *, raw: dict[str, Any], config_path: Path, palette: dict[str, str]
-) -> GroupConfig:
-    container_keys = [key for key in ("rows", "columns") if key in raw]
+) -> LayoutNode:
+    container_keys = [key for key in ("rows", "columns", "tabs") if key in raw]
     if len(container_keys) != 1:
-        raise SystemExit(f"Config {config_path} must define exactly one of 'rows' or 'columns'")
-    key = container_keys[0]
-    return parse_group(
-        kind="row" if key == "rows" else "column",
-        children_raw=raw[key],
+        raise SystemExit(
+            f"Config {config_path} must define exactly one of 'rows', 'columns', or 'tabs'"
+        )
+    return parse_container(
+        key=container_keys[0],
+        children_raw=raw[container_keys[0]],
         config_path=config_path,
-        path=key,
+        path=container_keys[0],
         raw=raw,
         palette=palette,
+        defaults=parse_layout_defaults(
+            raw, inherited=LayoutDefaults(), config_path=config_path, path="root", palette=palette
+        ),
+    )
+
+
+def parse_container(
+    *,
+    key: str,
+    children_raw: Any,
+    config_path: Path,
+    path: str,
+    raw: dict[str, Any],
+    palette: dict[str, str],
+    defaults: LayoutDefaults,
+) -> LayoutNode:
+    if key == "tabs":
+        return parse_tabs(
+            tabs_raw=children_raw,
+            config_path=config_path,
+            path=path,
+            raw=raw,
+            palette=palette,
+            defaults=defaults,
+        )
+    return parse_group(
+        kind="row" if key == "rows" else "column",
+        children_raw=children_raw,
+        config_path=config_path,
+        path=path,
+        raw=raw,
+        palette=palette,
+        defaults=defaults,
     )
 
 
@@ -355,6 +415,7 @@ def parse_group(
     path: str,
     raw: dict[str, Any],
     palette: dict[str, str],
+    defaults: LayoutDefaults,
 ) -> GroupConfig:
     if not isinstance(children_raw, list) or not children_raw:
         raise SystemExit(f"{config_path} {path} must be a non-empty list")
@@ -365,27 +426,41 @@ def parse_group(
         if not isinstance(item, dict):
             raise SystemExit(f"{config_path} {child_path} must be a mapping")
 
-        child_container_keys = [key for key in ("rows", "columns") if key in item]
+        child_container_keys = [key for key in ("rows", "columns", "tabs") if key in item]
         if len(child_container_keys) > 1:
             raise SystemExit(
-                f"{config_path} {child_path} must not define both 'rows' and 'columns'"
+                f"{config_path} {child_path} must not define more than one of 'rows', 'columns', or 'tabs'"
             )
+        child_defaults = parse_layout_defaults(
+            item,
+            inherited=defaults,
+            config_path=config_path,
+            path=child_path,
+            palette=palette,
+        )
 
         if child_container_keys:
             child_key = child_container_keys[0]
             children.append(
-                parse_group(
-                    kind="row" if child_key == "rows" else "column",
+                parse_container(
+                    key=child_key,
                     children_raw=item[child_key],
                     config_path=config_path,
                     path=f"{child_path}.{child_key}",
                     raw=item,
                     palette=palette,
+                    defaults=child_defaults,
                 )
             )
         else:
             children.append(
-                parse_slider(item, config_path=config_path, path=child_path, palette=palette)
+                parse_slider(
+                    item,
+                    config_path=config_path,
+                    path=child_path,
+                    palette=palette,
+                    defaults=child_defaults,
+                )
             )
 
     return GroupConfig(
@@ -396,22 +471,118 @@ def parse_group(
     )
 
 
+def parse_tabs(
+    *,
+    tabs_raw: Any,
+    config_path: Path,
+    path: str,
+    raw: dict[str, Any],
+    palette: dict[str, str],
+    defaults: LayoutDefaults,
+) -> TabsConfig:
+    if not isinstance(tabs_raw, list) or not tabs_raw:
+        raise SystemExit(f"{config_path} {path} must be a non-empty list")
+
+    tabs: list[TabConfig] = []
+    for index, item in enumerate(tabs_raw):
+        tab_path = f"{path}[{index}]"
+        if not isinstance(item, dict):
+            raise SystemExit(f"{config_path} {tab_path} must be a mapping")
+        if set(item.keys()) != {"tab"}:
+            raise SystemExit(f"{config_path} {tab_path} must define exactly one 'tab' mapping")
+        tabs.append(
+            parse_tab(
+                item["tab"],
+                config_path=config_path,
+                path=f"{tab_path}.tab",
+                palette=palette,
+                defaults=defaults,
+            )
+        )
+
+    return TabsConfig(
+        tabs=tabs,
+        width=parse_size(raw.get("width"), config_path=config_path, path=f"{path}.width"),
+        height=parse_size(raw.get("height"), config_path=config_path, path=f"{path}.height"),
+    )
+
+
+def parse_tab(
+    raw: Any,
+    *,
+    config_path: Path,
+    path: str,
+    palette: dict[str, str],
+    defaults: LayoutDefaults,
+) -> TabConfig:
+    if not isinstance(raw, dict):
+        raise SystemExit(f"{config_path} {path} must be a mapping")
+
+    name = raw.get("name")
+    if not isinstance(name, str) or not name.strip():
+        raise SystemExit(f"{config_path} {path}.name must be a non-empty string")
+
+    container_keys = [key for key in ("rows", "columns", "tabs") if key in raw]
+    if len(container_keys) != 1:
+        raise SystemExit(
+            f"{config_path} {path} must define exactly one of 'rows', 'columns', or 'tabs'"
+        )
+
+    key = container_keys[0]
+    tab_defaults = parse_layout_defaults(
+        raw, inherited=defaults, config_path=config_path, path=path, palette=palette
+    )
+    return TabConfig(
+        name=name.strip(),
+        content=parse_container(
+            key=key,
+            children_raw=raw[key],
+            config_path=config_path,
+            path=f"{path}.{key}",
+            raw=raw,
+            palette=palette,
+            defaults=tab_defaults,
+        ),
+    )
+
+
 def parse_slider(
-    raw: dict[str, Any], *, config_path: Path, path: str, palette: dict[str, str]
+    raw: dict[str, Any],
+    *,
+    config_path: Path,
+    path: str,
+    palette: dict[str, str],
+    defaults: LayoutDefaults,
 ) -> SliderConfig:
     try:
         slider = SliderConfig(
             name=str(raw["name"]),
-            channel=validate_range(int(raw["channel"]), 1, 16, f"{path}.channel", config_path),
-            control=validate_range(int(raw["control"]), 0, 127, f"{path}.control", config_path),
-            default=validate_range(int(raw.get("default", 0)), 0, 127, f"{path}.default", config_path),
-            minimum=validate_range(int(raw.get("min", 0)), 0, 127, f"{path}.min", config_path),
-            maximum=validate_range(int(raw.get("max", 127)), 0, 127, f"{path}.max", config_path),
-            speed=parse_speed(
-                raw.get("speed", 1.0), config_path=config_path, path=f"{path}.speed"
+            channel=validate_range(
+                int(raw.get("channel", defaults.channel)), 1, 16, f"{path}.channel", config_path
             ),
-            orientation=str(raw.get("orientation", "vertical")),
-            color=resolve_color(raw.get("color", "#d26a2e"), palette=palette, config_path=config_path, path=f"{path}.color"),
+            control=validate_range(int(raw["control"]), 0, 127, f"{path}.control", config_path),
+            default=validate_range(
+                int(raw.get("default", defaults.default)), 0, 127, f"{path}.default", config_path
+            ),
+            minimum=validate_range(
+                int(raw.get("min", defaults.minimum)), 0, 127, f"{path}.min", config_path
+            ),
+            maximum=validate_range(
+                int(raw.get("max", defaults.maximum)), 0, 127, f"{path}.max", config_path
+            ),
+            steps=parse_steps(
+                raw.get("steps", defaults.steps), config_path=config_path, path=f"{path}.steps"
+            ),
+            speed=parse_speed(
+                raw.get("speed", defaults.speed), config_path=config_path, path=f"{path}.speed"
+            ),
+            orientation=str(raw.get("orientation", defaults.orientation)),
+            color=resolve_color(
+                raw.get("color", defaults.color),
+                palette=palette,
+                config_path=config_path,
+                path=f"{path}.color",
+            ),
             width=parse_size(raw.get("width"), config_path=config_path, path=f"{path}.width"),
             height=parse_size(raw.get("height"), config_path=config_path, path=f"{path}.height"),
             osc=parse_osc_route(raw.get("osc"), config_path=config_path, path=f"{path}.osc"),
@@ -427,6 +598,60 @@ def parse_slider(
     if slider.orientation not in {"horizontal", "vertical"}:
         raise SystemExit(f"{config_path} {path}.orientation must be 'horizontal' or 'vertical'")
     return slider
+
+
+def parse_layout_defaults(
+    raw: dict[str, Any],
+    *,
+    inherited: LayoutDefaults,
+    config_path: Path,
+    path: str,
+    palette: dict[str, str],
+) -> LayoutDefaults:
+    channel = inherited.channel
+    if "channel" in raw:
+        channel = validate_range(int(raw["channel"]), 1, 16, f"{path}.channel", config_path)
+
+    default = inherited.default
+    if "default" in raw:
+        default = validate_range(int(raw["default"]), 0, 127, f"{path}.default", config_path)
+
+    minimum = inherited.minimum
+    if "min" in raw:
+        minimum = validate_range(int(raw["min"]), 0, 127, f"{path}.min", config_path)
+
+    maximum = inherited.maximum
+    if "max" in raw:
+        maximum = validate_range(int(raw["max"]), 0, 127, f"{path}.max", config_path)
+
+    steps = inherited.steps
+    if "steps" in raw:
+        steps = parse_steps(raw["steps"], config_path=config_path, path=f"{path}.steps")
+
+    speed = inherited.speed
+    if "speed" in raw:
+        speed = parse_speed(raw["speed"], config_path=config_path, path=f"{path}.speed")
+
+    orientation = inherited.orientation
+    if "orientation" in raw:
+        orientation = str(raw["orientation"])
+
+    color = inherited.color
+    if "color" in raw:
+        color = resolve_color(
+            raw["color"], palette=palette, config_path=config_path, path=f"{path}.color"
+        )
+
+    return LayoutDefaults(
+        channel=channel,
+        default=default,
+        minimum=minimum,
+        maximum=maximum,
+        steps=steps,
+        speed=speed,
+        orientation=orientation,
+        color=color,
+    )
 
 
 def parse_osc_route(raw: Any, *, config_path: Path, path: str) -> OscRouteConfig | None:
@@ -476,6 +701,18 @@ def parse_speed(raw: Any, *, config_path: Path, path: str) -> float:
     return value
 
 
+def parse_steps(raw: Any, *, config_path: Path, path: str) -> int | None:
+    if raw is None:
+        return None
+    try:
+        value = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise SystemExit(f"{config_path} {path} must be an integer") from exc
+    if value < 2:
+        raise SystemExit(f"{config_path} {path} must be 2 or greater")
+    return value
+
+
 def parse_numeric_value(raw: Any, *, config_path: Path, path: str) -> float:
     try:
         return float(raw)
@@ -500,6 +737,11 @@ def parse_size(value: Any, *, config_path: Path, path: str) -> SizeSpec | None:
 def collect_sliders(node: LayoutNode) -> list[SliderConfig]:
     if isinstance(node, SliderConfig):
         return [node]
+    if isinstance(node, TabsConfig):
+        sliders: list[SliderConfig] = []
+        for tab in node.tabs:
+            sliders.extend(collect_sliders(tab.content))
+        return sliders
 
     sliders: list[SliderConfig] = []
     for child in node.children:
@@ -686,6 +928,7 @@ class RuntimeState:
                 "control": node.control,
                 "min": node.minimum,
                 "max": node.maximum,
+                "steps": node.steps,
                 "speed": normalize_numeric_value(node.speed),
                 "orientation": node.orientation,
                 "color": node.color,
@@ -693,6 +936,15 @@ class RuntimeState:
                 "height": serialize_size(node.height),
                 "osc": serialize_osc_route(node.osc),
                 "label": self.format_slider_label(node, value),
+            }
+        if isinstance(node, TabsConfig):
+            return {
+                "type": "tabs",
+                "width": serialize_size(node.width),
+                "height": serialize_size(node.height),
+                "tabs": [
+                    {"name": tab.name, "content": self._serialize_layout(tab.content)} for tab in node.tabs
+                ],
             }
 
         return {
@@ -706,14 +958,12 @@ class RuntimeState:
         live_state: dict[str, float] = {}
         for slider in self._config.sliders:
             value = self._state.get(slider.state_key, float(slider.default))
-            live_state[slider.state_key] = clamp_numeric_value(
-                value, minimum=slider.minimum, maximum=slider.maximum
-            )
+            live_state[slider.state_key] = quantize_slider_value(slider, value)
         self._state = live_state
         self._save_state_locked()
 
     def _update_slider_locked(self, slider: SliderConfig, value: float, *, force_midi: bool = False) -> None:
-        bounded = clamp_numeric_value(value, minimum=slider.minimum, maximum=slider.maximum)
+        bounded = quantize_slider_value(slider, value)
         self._state[slider.state_key] = bounded
         self._save_state_locked()
         self._send_midi_value(slider, bounded, force=force_midi)
@@ -814,6 +1064,20 @@ def map_value(
 
 def clamp_numeric_value(value: float, *, minimum: float, maximum: float) -> float:
     return min(maximum, max(minimum, value))
+
+
+def quantize_slider_value(slider: SliderConfig, value: float) -> float:
+    bounded = clamp_numeric_value(value, minimum=slider.minimum, maximum=slider.maximum)
+    if slider.steps is None:
+        return bounded
+
+    if slider.maximum == slider.minimum:
+        return float(slider.minimum)
+
+    step_size = (slider.maximum - slider.minimum) / (slider.steps - 1)
+    step_index = round((bounded - slider.minimum) / step_size)
+    quantized = slider.minimum + (step_index * step_size)
+    return clamp_numeric_value(quantized, minimum=slider.minimum, maximum=slider.maximum)
 
 
 def normalize_numeric_value(value: float) -> int | float:

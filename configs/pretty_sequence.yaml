@@ -1,0 +1,61 @@
+output: IAC Driver Bus 1
+inertia: 2
+osc:
+  host: 127.0.0.1
+  port: 9000
+palette:
+  orange: "#d26a2e"
+  moss: "#5f8f6b"
+  clay: "#b85d45"
+  slate: "#5077b5"
+  sand: "#c8a76a"
+  plum: "#8a5a7c"
+  teal: "#4f8f88"
+rows:
+  - height: 70%
+    color: orange
+    steps: 25
+    columns:
+      - name: 1
+        control: 10
+      - name: 2
+        control: 20
+      - name: 3
+        control: 30
+      - name: 4
+        control: 40
+      - name: 5
+        control: 50
+      - name: 6
+        control: 60
+      - name: 7
+        control: 70
+      - name: 8
+        control: 80
+  - color: plum
+    columns:
+      - name: A1
+        control: 11
+        default: 0
+      - name: A2
+        control: 21
+        default: 0
+      - name: A3
+        control: 31
+        default: 0
+      - name: A4
+        control: 41
+        default: 0
+      - name: A5
+        control: 51
+        default: 0
+      - name: A6
+        control: 61
+        default: 0
+      - name: A7
+        control: 71
+        default: 0
+      - name: A8
+        control: 81
+        default: 0
+      

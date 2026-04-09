@@ -15,7 +15,28 @@ The server prefers port `8765` on each run and falls back to a random free port 
 
 ## Config format
 
-Configs stay in YAML, but the backend normalizes them into JSON for the browser UI. Layout is now defined as nested `rows` and `columns` containers. Children do not declare their own type: a node is a container if it has `rows:` or `columns:`, otherwise it is treated as a control.
+Configs stay in YAML, but the backend normalizes them into JSON for the browser UI. Layout is defined as nested `rows`, `columns`, and `tabs` containers. Children do not declare their own type: a node is a container if it has `rows:`, `columns:`, or `tabs:`, otherwise it is treated as a control.
+
+Container children can carry sizing fields and shared slider defaults next to their layout key. Slider defaults cascade down to descendant sliders unless a child overrides them. `channel` defaults to `1` if nothing sets it. For example, if a `rows` child is a `columns` container, put `height`, `channel`, `color`, or `steps` on the same mapping as `columns`:
+
+```yaml
+rows:
+  - height: 70%
+    channel: 1
+    color: sand
+    steps: 25
+    columns:
+      - name: 1
+        control: 1
+        default: 0
+      - name: 2
+        control: 2
+        default: 0
+  - columns:
+      - name: 3
+        control: 3
+        color: moss
+```
 
 ```yaml
 title: Demo Controller
@@ -55,24 +76,41 @@ columns:
         control: 75
         default: 32
         color: moss
+  - tabs:
+      - tab:
+          name: Tabbed Content A
+          rows:
+            - name: Env A
+              channel: 1
+              control: 76
+              default: 48
+      - tab:
+          name: Tabbed Content B
+          rows:
+            - name: Env B
+              channel: 1
+              control: 77
+              default: 48
 ```
 
 The layout fills the available UI area as a mosaic:
 
 - children inside `rows` split the available height equally by default
 - children inside `columns` split the available width equally by default
+- children inside `tabs` render as one visible panel at a time with clickable tab labels
 - explicit `width` or `height` values can be set with `%` or `px`
 - any remaining space is distributed evenly across siblings without an explicit size
 
 Supported slider fields:
 
 - `name`
-- `channel` from `1` to `16`
+- `channel` from `1` to `16`, optional when inherited from a parent container, defaults to `1`
 - `control` from `0` to `127`
-- `default`, `min`, `max`
-- `speed`: optional positive number, where `1` keeps the current feel, smaller values move faster, and larger values require more drag/scroll movement for smaller value changes
-- `orientation`: `horizontal` or `vertical`
-- `color`: any CSS color string or a name from the root `palette`
+- `default`, `min`, `max`: optional, may be inherited from a parent container
+- `steps`: optional integer `>= 2` that snaps the slider to a fixed number of positions between `min` and `max`, inclusive, may be inherited from a parent container
+- `speed`: optional positive number, where `1` keeps the current feel, smaller values move faster, and larger values require more drag/scroll movement for smaller value changes, may be inherited from a parent container
+- `orientation`: `horizontal` or `vertical`, may be inherited from a parent container
+- `color`: any CSS color string or a name from the root `palette`, optional when inherited from a parent container
 - `width`, `height`: optional `%` or `px` sizes for the control tile
 - `osc`: optional per-slider OSC mapping
 - `osc.path`: OSC address to send when the slider changes
@@ -82,7 +120,15 @@ Supported layout group fields:
 
 - `rows`
 - `columns`
+- `tabs`
+- `channel`, `default`, `min`, `max`, `steps`, `speed`, `orientation`, `color`: optional inherited defaults for descendant sliders
 - `width`, `height`: optional `%` or `px` sizes for the container tile
+
+Supported tab item fields:
+
+- `tab`
+- `tab.name`
+- exactly one of `tab.rows`, `tab.columns`, or `tab.tabs`
 
 Optional root fields:
 
@@ -94,6 +140,7 @@ Optional root fields:
 
 - Slider state is saved in `~/.visual-midi/states/<config-name>.json`
 - Slider state is tracked internally as a float, which is especially useful with low `speed` values and OSC mappings
+- If `steps` is set, slider values are quantized across that many evenly spaced positions between `min` and `max`
 - MIDI sends the nearest CC value for the current slider position and skips repeats when float changes round to the same CC
 - OSC sends the current float slider position mapped into the configured `osc.min`/`osc.max` range
 - YAML edits are watched and trigger UI reload plus MIDI/OSC state resend

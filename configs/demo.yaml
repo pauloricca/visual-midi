@@ -115,3 +115,48 @@ columns:
             default: 32
             color: teal
             orientation: horizontal
+  - tabs:
+      - tab:
+          name: Tabbed Content A
+          rows:
+            - name: Freq D
+              channel: 1
+              control: 31
+              default: 64
+              color: clay
+              height: 70%
+            - rows:
+                - name: Amp D
+                  channel: 1
+                  control: 32
+                  default: 32
+                  color: clay
+                  orientation: horizontal
+                - name: LFO D
+                  channel: 1
+                  control: 33
+                  default: 24
+                  color: sand
+                  orientation: horizontal
+      - tab:
+          name: Tabbed Content B
+          rows:
+            - name: Freq E
+              channel: 1
+              control: 41
+              default: 64
+              color: plum
+              height: 70%
+            - rows:
+                - name: Amp E
+                  channel: 1
+                  control: 42
+                  default: 32
+                  color: plum
+                  orientation: horizontal
+                - name: LFO E
+                  channel: 1
+                  control: 43
+                  default: 24
+                  color: moss
+                  orientation: horizontal
