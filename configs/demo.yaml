@@ -11,152 +11,202 @@ palette:
   sand: "#c8a76a"
   plum: "#8a5a7c"
   teal: "#4f8f88"
-columns:
-  - rows:
-      - name: Freq A
-        channel: 1
-        control: 1
-        default: 64
-        color: sand
-        height: 70%
-        speed: 0.2
-        osc:
-          path: /waves/a/freq
-          min: 20
-          max: 20000
-      - rows:
-          - name: Amp A
-            channel: 1
-            control: 2
-            default: 32
-            color: moss
-            orientation: horizontal
-            osc:
-              path: /visual/amp/a
-              min: 0
-              max: 1
-          - name: LFO Freq A
-            channel: 1
-            control: 3
-            default: 32
-            color: moss
-            orientation: horizontal
-          - name: LFO Amp A
-            channel: 1
-            control: 4
-            default: 32
-            color: moss
-            orientation: horizontal
-  - rows:
-      - name: Freq B
-        channel: 1
-        control: 11
-        default: 64
-        color: orange
-        height: 70%
-        osc:
-          path: /visual/freq/b
-          min: 20
-          max: 20000
-      - rows:
-          - name: Amp B
-            channel: 1
-            control: 12
-            default: 32
-            color: plum
-            orientation: horizontal
-            osc:
-              path: /visual/amp/b
-              min: 0
-              max: 1
-          - name: LFO Freq B
-            channel: 1
-            control: 13
-            default: 32
-            color: plum
-            orientation: horizontal
-          - name: LFO Amp B
-            channel: 1
-            control: 14
-            default: 32
-            color: plum
-            orientation: horizontal
-  - rows:
-      - name: Freq C
-        channel: 1
-        control: 21
-        default: 64
-        color: slate
-        height: 70%
-        osc:
-          path: /visual/freq/c
-          min: 20
-          max: 20000
-      - rows:
-          - name: Amp C
-            channel: 1
-            control: 22
-            default: 32
-            color: teal
-            orientation: horizontal
-            osc:
-              path: /visual/amp/c
-              min: 0
-              max: 1
-          - name: LFO Freq C
-            channel: 1
-            control: 23
-            default: 32
-            color: teal
-            orientation: horizontal
-          - name: LFO Amp C
-            channel: 1
-            control: 24
-            default: 32
-            color: teal
-            orientation: horizontal
-  - tabs:
-      - tab:
-          name: Tabbed Content A
-          rows:
-            - name: Freq D
+rows:
+  - columns:
+    - rows:
+        - name: Filter cutoff
+          channel: 1
+          control: 1
+          default: 64
+          color: sand
+          height: 50%
+          osc:
+            path: /waves/a/freq
+            min: 20
+            max: 20000
+        - rows:
+            - name: Filter peak
               channel: 1
-              control: 31
-              default: 64
-              color: clay
-              height: 70%
-            - rows:
-                - name: Amp D
-                  channel: 1
-                  control: 32
-                  default: 32
-                  color: clay
-                  orientation: horizontal
-                - name: LFO D
-                  channel: 1
-                  control: 33
-                  default: 24
-                  color: sand
-                  orientation: horizontal
-      - tab:
-          name: Tabbed Content B
-          rows:
-            - name: Freq E
+              control: 2
+              default: 32
+              color: moss
+              orientation: horizontal
+              osc:
+                path: /visual/amp/a
+                min: 0
+                max: 1
+            - name: LFO Freq A
               channel: 1
-              control: 41
-              default: 64
+              control: 3
+              default: 32
+              color: moss
+              orientation: horizontal
+            - name: LFO Amp A
+              channel: 1
+              control: 4
+              default: 32
+              color: moss
+              orientation: horizontal
+    - rows:
+        - type: lfo
+          name: Fold
+          complex: true
+          max_speed: 6
+          channel: 1
+          control: 11
+          color: orange
+          height: 50%
+          min: 50
+          max: 127
+          osc:
+            path: /visual/freq/b
+            min: 20
+            max: 20000
+        - rows:
+            - name: Amp B
+              channel: 1
+              control: 12
+              default: 32
               color: plum
-              height: 70%
-            - rows:
-                - name: Amp E
-                  channel: 1
-                  control: 42
-                  default: 32
-                  color: plum
-                  orientation: horizontal
-                - name: LFO E
-                  channel: 1
-                  control: 43
-                  default: 24
-                  color: moss
-                  orientation: horizontal
+              orientation: horizontal
+              osc:
+                path: /visual/amp/b
+                min: 0
+                max: 1
+            - name: LFO Freq B
+              channel: 1
+              control: 13
+              default: 32
+              color: plum
+              orientation: horizontal
+            - name: LFO Amp B
+              channel: 1
+              control: 14
+              default: 32
+              color: plum
+              orientation: horizontal
+    - rows:
+        - name: Fold bias
+          channel: 1
+          control: 21
+          default: 64
+          color: slate
+          height: 50%
+          osc:
+            path: /visual/freq/c
+            min: 20
+            max: 20000
+        - rows:
+            - name: Amp C
+              channel: 1
+              control: 22
+              default: 32
+              color: teal
+              orientation: horizontal
+              osc:
+                path: /visual/amp/c
+                min: 0
+                max: 1
+            - name: LFO Freq C
+              channel: 1
+              control: 23
+              default: 32
+              color: teal
+              orientation: horizontal
+            - name: LFO Amp C
+              channel: 1
+              control: 24
+              default: 32
+              color: teal
+              orientation: horizontal
+    - tabs:
+        - tab:
+            name: Buttons
+            rows:
+              - type: button
+                name: Button A
+                channel: 1
+                control: 31
+                default: 64
+                color: clay
+              - type: button
+                name: Button B
+                channel: 1
+                control: 31
+                default: 64
+                color: orange
+              - type: button
+                name: Button C
+                channel: 1
+                control: 31
+                default: 64
+                color: plum
+        - tab:
+            name: Sliders
+            rows:
+              - name: Freq E
+                channel: 1
+                control: 41
+                default: 64
+                color: plum
+              - rows:
+                  - name: Amp E
+                    channel: 1
+                    control: 42
+                    default: 32
+                    color: plum
+                    orientation: horizontal
+                  - name: LFO E
+                    channel: 1
+                    control: 43
+                    default: 24
+                    color: moss
+                    orientation: horizontal
+        - tab:
+            name: Sliders
+            rows:
+              - name: Freq E
+                channel: 1
+                control: 41
+                default: 64
+                color: plum
+              - rows:
+                  - name: Amp E
+                    channel: 1
+                    control: 42
+                    default: 32
+                    color: plum
+                    orientation: horizontal
+                  - name: LFO E
+                    channel: 1
+                    control: 43
+                    default: 24
+                    color: moss
+                    orientation: horizontal
+  - height: 20%
+    columns:
+      - type: tempo
+        name: Tempo
+        width: 18%
+        min: 40
+        max: 240
+        default: 120
+        color: clay
+      - type: sequencer
+        name: Bass Seq
+        mode: notes
+        # control: 3
+        channel: 1
+        size: 8
+        subdivision: 1/8
+        root: C2
+        scale: minor
+        color: sand
+        width: 30%
+      - name: lead
+        type: keyboard
+        # size: 48
+        start: C3
+        size: 12
+        root: C4
+        scale: minor

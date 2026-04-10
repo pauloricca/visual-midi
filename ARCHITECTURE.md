@@ -24,12 +24,17 @@ The backend:
 - watches the YAML file for changes via mtime polling
 - reloads config safely when valid
 - serves JSON APIs and static frontend assets
+- sends keyboard note on/off gates through a dedicated API path
+- owns the global transport clock and tempo state
 
 The frontend:
 
 - fetches normalized config/state from `/api/config`
 - renders layout recursively from JSON
 - sends slider updates to `/api/slider`
+- sends keyboard note gates to `/api/keyboard`
+- sends tempo updates to `/api/tempo`
+- sends transport play/stop to `/api/transport`
 - polls `/api/version` and reloads when config changes
 - shows a QR code for LAN access unless `?noqr` is present
 
@@ -53,6 +58,9 @@ Current concepts:
 - `output`
 - `rows` / `columns` / `tabs`
 - `slider`
+- `keyboard`
+- `button`
+- `tempo`
 
 Layout is a tree of:
 
@@ -60,6 +68,9 @@ Layout is a tree of:
 - `columns`
 - `tabs`
 - `slider`
+- `keyboard`
+- `button`
+- `tempo`
 
 Slider presentation fields may include:
 

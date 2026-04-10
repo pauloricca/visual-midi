@@ -11,12 +11,14 @@
 
 * {
   box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
 }
 
 html,
 body {
   height: 100%;
   min-height: 100%;
+  touch-action: manipulation;
 }
 
 body {
@@ -32,6 +34,14 @@ body {
   overscroll-behavior: none;
   user-select: none;
   -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+button,
+a,
+[role="button"] {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
 }
 
 .app-shell {
@@ -41,6 +51,8 @@ body {
   flex-direction: column;
   gap: 16px;
   overflow: hidden;
+  border-top: 2px solid black;
+  border-bottom: 2px solid black;
 }
 
 .app-header h1 {
@@ -113,14 +125,16 @@ body {
   display: flex;
   flex: 0 0 auto;
   gap: 0;
-  border-bottom: 2px solid black;
+  border: 2px solid black;
   background: color-mix(in srgb, var(--panel) 86%, #d7ceb9);
 }
 
 .layout-tab-button {
   appearance: none;
+  flex: 1 1 0;
+  min-width: 0;
   border: 0;
-  border-right: 2px solid black;
+  border-right: 1px solid black;
   border-radius: 0;
   background: transparent;
   color: black;
@@ -188,10 +202,16 @@ body {
 
 .control--horizontal {
   width: 100%;
+  cursor: ew-resize;
 }
 
 .control--vertical {
   height: 100%;
+  cursor: ns-resize;
+}
+
+.control--lfo {
+  cursor: move;
 }
 
 .control-fill {
@@ -235,6 +255,478 @@ body {
   align-self: flex-start;
 }
 
+.lfo-complex {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+  border: 2px solid black;
+  background: color-mix(in srgb, var(--accent) 50%, white);
+}
+
+.lfo-complex-fill {
+  position: absolute;
+  inset: auto 0 0 0;
+  width: 100%;
+  height: 0;
+  background: color-mix(in srgb, var(--accent) 86%, white);
+  opacity: 1;
+  z-index: 0;
+}
+
+.lfo-complex-title {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  z-index: 2;
+  font-size: clamp(1rem, 2vw, 1.7rem);
+  font-weight: 600;
+  line-height: 1;
+  color: black;
+  pointer-events: none;
+}
+
+.lfo-grid {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+
+.lfo-panel {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: transparent;
+  border-right: 1px solid black;
+  border-bottom: 1px solid black;
+  touch-action: none;
+  cursor: ns-resize;
+}
+
+.lfo-panel:nth-child(2n) {
+  border-right: 0;
+}
+
+.lfo-panel:nth-child(n + 3) {
+  border-bottom: 0;
+}
+
+.lfo-panel-fill {
+  position: absolute;
+  inset: auto auto 0 0;
+  width: 100%;
+  height: 0;
+  border-top: 4px solid black;
+}
+
+.lfo-panel-chrome {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  padding: 8px;
+}
+
+.lfo-panel-label {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: black;
+  opacity: 1;
+  font-size: clamp(0.62rem, 0.95vw, 0.82rem);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.keyboard-control {
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  background: color-mix(in srgb, var(--keyboard-accent) 12%, white);
+  border: 2px solid black;
+  touch-action: none;
+}
+
+.keyboard-surface {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  touch-action: none;
+}
+
+.keyboard-white-layer {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: stretch;
+}
+
+.keyboard-white-layer--scale {
+  gap: 0;
+}
+
+.keyboard-black-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+}
+
+.keyboard-key {
+  appearance: none;
+  border: 0;
+  border-radius: 0;
+  margin: 0;
+  padding: 0;
+  touch-action: none;
+  cursor: pointer;
+}
+
+.keyboard-key--white {
+  position: relative;
+  flex: 1 1 0;
+  height: 100%;
+  background: color-mix(in srgb, var(--keyboard-accent) 18%, white);
+  border-right: 4px solid color-mix(in srgb, var(--keyboard-accent) 14%, black);
+}
+
+.keyboard-key--white:last-child {
+  border-right: 0;
+}
+
+.keyboard-key--black {
+  position: absolute;
+  top: 0;
+  height: 62%;
+  transform: translateX(-50%);
+  background: color-mix(in srgb, var(--keyboard-accent) 72%, black);
+  border: 4px solid color-mix(in srgb, var(--keyboard-accent) 24%, black);
+  border-top: 0;
+  pointer-events: auto;
+  z-index: 2;
+}
+
+.keyboard-key--scale {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+  background: color-mix(in srgb, var(--keyboard-accent) 18%, white);
+  border-right: 1px solid color-mix(in srgb, var(--keyboard-accent) 14%, black);
+  color: color-mix(in srgb, black 82%, var(--keyboard-accent));
+  font: inherit;
+  font-size: clamp(0.9rem, 1.5vw, 1.1rem);
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 12px 8px 8px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.keyboard-key--scale:last-child {
+  border-right: 0;
+}
+
+.keyboard-key--root {
+  background: color-mix(in srgb, var(--keyboard-accent) 34%, white);
+  box-shadow: inset 0 8px 0 color-mix(in srgb, var(--keyboard-accent) 68%, white);
+}
+
+.keyboard-key--white.is-active {
+  background: color-mix(in srgb, var(--keyboard-accent) 44%, white);
+}
+
+.keyboard-key--black.is-active {
+  background: color-mix(in srgb, var(--keyboard-accent) 90%, black);
+}
+
+.keyboard-key--scale.is-active {
+  background: color-mix(in srgb, var(--keyboard-accent) 52%, white);
+}
+
+.keyboard-key--scale.keyboard-key--root.is-active {
+  background: color-mix(in srgb, var(--keyboard-accent) 64%, white);
+}
+
+.keyboard-chrome {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px 10px;
+  position: absolute;
+  pointer-events: none;
+  z-index: 2;
+  bottom: 0;
+}
+
+.keyboard-title {
+  font-size: clamp(1rem, 2vw, 1.7rem);
+  font-weight: 600;
+  line-height: 1;
+  color: black;
+}
+
+.keyboard-meta {
+  color: black;
+  opacity: 0.38;
+  font-size: clamp(0.7rem, 1.1vw, 0.95rem);
+  line-height: 1.15;
+}
+
+.button-control {
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 12px 10px;
+  background: color-mix(in srgb, var(--button-accent) 24%, white);
+  border: 2px solid black;
+  touch-action: none;
+  cursor: pointer;
+}
+
+.button-control.is-active {
+  background: color-mix(in srgb, var(--button-accent) 52%, white);
+}
+
+.button-title {
+  font-size: clamp(1rem, 2vw, 1.7rem);
+  font-weight: 700;
+  line-height: 1;
+  color: black;
+}
+
+.button-meta {
+  color: black;
+  opacity: 0.34;
+  font-size: clamp(0.7rem, 1.1vw, 0.95rem);
+  line-height: 1.15;
+  white-space: pre-line;
+}
+
+.tempo-control {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  padding: 16px 14px 14px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--tempo-accent) 14%, white), color-mix(in srgb, var(--tempo-accent) 34%, white));
+  border: 2px solid black;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.tempo-value {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 10px;
+  min-height: 0;
+  color: black;
+  line-height: 0.9;
+  transform: translateY(8px);
+  cursor: ns-resize;
+}
+
+.tempo-value-number {
+  font-size: clamp(1.35rem, 6vw, 2.8rem);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+.tempo-value-unit {
+  font-size: clamp(0.65rem, 1.4vw, 0.95rem);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: pre;
+}
+
+.tempo-transport {
+  display: flex;
+  justify-content: center;
+}
+
+.tempo-transport-button {
+  appearance: none;
+  position: relative;
+  width: 56px;
+  height: 56px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+}
+
+.tempo-transport-button::before,
+.tempo-transport-button::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+}
+
+.tempo-transport-button::before {
+  width: 0;
+  height: 0;
+  border-top: 12px solid transparent;
+  border-bottom: 12px solid transparent;
+  border-left: 20px solid black;
+  transform: translateX(3px);
+}
+
+.tempo-transport-button.is-active::before {
+  width: 18px;
+  height: 18px;
+  border: 0;
+  background: black;
+  transform: none;
+}
+
+.tempo-transport-button:hover::before,
+.tempo-transport-button:focus-visible::before {
+  opacity: 0.72;
+}
+
+.tempo-transport-button:focus-visible {
+  outline: 2px solid black;
+  outline-offset: 2px;
+}
+
+.sequencer-control {
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  background: color-mix(in srgb, var(--sequencer-accent) 14%, white);
+  border: 2px solid black;
+  overflow: hidden;
+}
+
+.sequencer-surface {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(var(--sequencer-size), minmax(0, 1fr));
+  gap: 0;
+  align-items: stretch;
+}
+
+.sequencer-step {
+  appearance: none;
+  min-width: 0;
+  min-height: 100%;
+  position: relative;
+  border: 0;
+  border-right: 1px solid black;
+  border-radius: 0;
+  background: color-mix(in srgb, var(--sequencer-accent) 18%, white);
+  color: black;
+  padding: 8px 4px 6px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+  overflow: hidden;
+  touch-action: none;
+  cursor: ns-resize;
+}
+
+.sequencer-step:last-child {
+  border-right: 0;
+}
+
+.sequencer-step.is-enabled {
+  background: color-mix(in srgb, var(--sequencer-accent) 34%, white);
+}
+
+.sequencer-step.is-current {
+  box-shadow: inset 0 0 0 4px black;
+}
+
+.sequencer-step-fill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 0;
+  background: color-mix(in srgb, var(--sequencer-accent) 78%, white);
+  opacity: 0.92;
+}
+
+.sequencer-step-value {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  z-index: 1;
+  transform: translateX(-50%);
+  min-width: 0;
+  max-width: calc(100% - 16px);
+  color: color-mix(in srgb, black 82%, var(--sequencer-accent));
+  font: inherit;
+  font-size: clamp(0.9rem, 1.5vw, 1.1rem);
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+}
+
+.sequencer-chrome {
+  position: absolute;
+  bottom: 0;
+  z-index: 2;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px 10px;
+}
+
+.sequencer-title {
+  font-size: clamp(1rem, 2vw, 1.7rem);
+  font-weight: 600;
+  line-height: 1;
+  color: black;
+}
+
+.sequencer-meta {
+  color: black;
+  opacity: 0.38;
+  font-size: clamp(0.7rem, 1.1vw, 0.95rem);
+  line-height: 1.15;
+  white-space: pre-line;
+}
+
 .qr-panel {
   flex: 0 0 auto;
   padding: 18px 16px;
@@ -243,7 +735,7 @@ body {
   box-shadow: var(--shadow);
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 20px;
   user-select: text;
   -webkit-user-select: text;
