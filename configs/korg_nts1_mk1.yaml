@@ -1,0 +1,238 @@
+# KORG Nu:Tekt NTS-1 digital kit mk1 controller template.
+#
+# Covers all 29 MIDI CC parameters from the mk1 MIDI implementation chart.
+# On the NTS-1, set the global MIDI channel to match `channel` below and set
+# MIDI RX ShortMessage to ON. For tempo clock, set MIDI Clock src to Auto.
+title: KORG NTS-1 mk1
+# output: NTS-1 digital kit
+output: IAC Driver Bus 1
+inertia: 1.2
+palette:
+  osc: "#d85a3a"
+  filter: "#2f7f68"
+  envelope: "#8a5a7c"
+  fx: "#3b75b7"
+  arp: "#6f6a2d"
+  motion: "#b04772"
+  play: "#5f6d78"
+rows:
+  - name: patch
+    height: 72%
+    channel: 1
+    columns:
+      - tabs:
+          - tab:
+              name: Osc
+              rows:
+                - columns:
+                    - name: Osc Type
+                      control: 53
+                      default: 0
+                      steps: 5
+                      color: osc
+                    - name: Shape
+                      control: 54
+                      default: 0
+                      color: osc
+                    - name: Alt
+                      control: 55
+                      default: 0
+                      color: osc
+                - columns:
+                    - type: lfo
+                      name: Osc LFO Rate
+                      control: 24
+                      default: 0
+                      complex: false
+                      max_speed: 4
+                      color: motion
+                    - type: lfo
+                      name: Osc LFO Depth
+                      control: 26
+                      default: 0
+                      complex: false
+                      max_speed: 4
+                      color: motion
+          - tab:
+              name: Filter
+              rows:
+                - columns:
+                    - name: Filter Type
+                      control: 42
+                      default: 127
+                      steps: 7
+                      color: filter
+                    - name: Cutoff
+                      control: 43
+                      default: 127
+                      color: filter
+                    - name: Resonance
+                      control: 44
+                      default: 0
+                      color: filter
+                - columns:
+                    - type: lfo
+                      name: Sweep Depth
+                      control: 45
+                      default: 63
+                      min: 0
+                      max: 127
+                      complex: true
+                      max_speed: 3
+                      color: motion
+                    - type: lfo
+                      name: Sweep Rate
+                      control: 46
+                      default: 0
+                      complex: false
+                      max_speed: 3
+                      color: motion
+      - tabs:
+          - tab:
+              name: EG
+              rows:
+                - columns:
+                    - name: EG Type
+                      control: 14
+                      default: 0
+                      steps: 5
+                      color: envelope
+                    - name: Attack
+                      control: 16
+                      default: 0
+                      color: envelope
+                    - name: Release
+                      control: 19
+                      default: 64
+                      color: envelope
+          - tab:
+              name: Tremolo
+              rows:
+                - columns:
+                    - type: lfo
+                      name: Tremolo Depth
+                      control: 20
+                      default: 0
+                      complex: false
+                      max_speed: 4
+                      color: motion
+                    - type: lfo
+                      name: Tremolo Rate
+                      control: 21
+                      default: 0
+                      complex: false
+                      max_speed: 4
+                      color: motion
+          - tab:
+              name: Arp
+              rows:
+                - columns:
+                    - name: Arp Pattern
+                      control: 117
+                      default: 0
+                      steps: 10
+                      color: arp
+                    - name: Arp Intervals
+                      control: 118
+                      default: 0
+                      steps: 6
+                      color: arp
+                    - name: Arp Length
+                      control: 119
+                      default: 64
+                      color: arp
+      - tabs:
+          - tab:
+              name: Mod
+              rows:
+                - columns:
+                    - name: Mod Type
+                      control: 88
+                      default: 0
+                      steps: 5
+                      color: fx
+                    - name: Mod Time
+                      control: 28
+                      default: 0
+                      color: fx
+                    - name: Mod Depth
+                      control: 29
+                      default: 0
+                      color: fx
+          - tab:
+              name: Delay
+              rows:
+                - columns:
+                    - name: Delay Type
+                      control: 89
+                      default: 0
+                      steps: 6
+                      color: fx
+                    - name: Delay Time
+                      control: 30
+                      default: 0
+                      color: fx
+                    - name: Delay Depth
+                      control: 31
+                      default: 0
+                      color: fx
+                    - name: Delay Mix
+                      control: 33
+                      default: 0
+                      color: fx
+          - tab:
+              name: Reverb
+              rows:
+                - columns:
+                    - name: Reverb Type
+                      control: 90
+                      default: 0
+                      steps: 6
+                      color: fx
+                    - name: Reverb Time
+                      control: 34
+                      default: 0
+                      color: fx
+                    - name: Reverb Depth
+                      control: 35
+                      default: 0
+                      color: fx
+                    - name: Reverb Mix
+                      control: 36
+                      default: 64
+                      color: fx
+  - height: 12%
+    columns:
+      - type: memory
+        name: Patch Memories
+        target: patch
+        slots: 8
+        transition: 1.5
+        color: play
+      - type: tempo
+        name: Clock
+        min: 40
+        max: 240
+        default: 120
+        color: arp
+  - height: 16%
+    channel: 1
+    columns:
+      - type: keyboard
+        name: Keys
+        start: C3
+        size: 24
+        color: play
+      - type: sequencer
+        name: Note Seq
+        mode: notes
+        size: 16
+        subdivision: 1/16
+        root: C3
+        scale: minor
+        min: 36
+        max: 84
+        velocity: true
+        gate: true
+        max_gate_steps: 4
+        color: arp

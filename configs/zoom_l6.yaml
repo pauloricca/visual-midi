@@ -1,0 +1,318 @@
+# ZOOM LiveTrak L-6 controller template.
+#
+# The L6 exposes mixer parameters through assignable MIDI CC numbers in
+# ZOOM L6 Editor. This file uses a complete suggested CC map; either set
+# the L6 Editor "MIDI CC# Mapping" page to match these control numbers, or
+# edit the control values below to match your current L6 mapping.
+title: ZOOM LiveTrak L-6
+# output: ZOOM L6
+output: IAC Driver Bus 1
+inertia: 1
+palette:
+  level: "#d85a3a"
+  pan: "#2f7f68"
+  send: "#3b75b7"
+  eq: "#b04772"
+  switch: "#6f6a2d"
+  system: "#5f6d78"
+rows:
+  - height: 84%
+    columns:
+      - name: Channel 1
+        channel: 1
+        rows:
+          - name: Ch 1 Level
+            control: 1
+            default: 0
+            color: level
+          - name: Ch 1 Pan
+            control: 7
+            default: 64
+            color: pan
+            orientation: horizontal
+          - rows:
+              - name: Ch 1 Aux 1
+                control: 19
+                default: 0
+                color: send
+              - name: Ch 1 Aux 2
+                control: 25
+                default: 0
+                color: send
+              - name: Ch 1 EFX Send
+                control: 31
+                default: 0
+                color: send
+          - name: Ch 1 EQ Hi
+            control: 38
+            default: 64
+            color: eq
+          - name: Ch 1 EQ Mid Freq
+            control: 44
+            default: 64
+            color: eq
+          - name: Ch 1 EQ Mid
+            control: 50
+            default: 64
+            color: eq
+          - name: Ch 1 EQ Low
+            control: 56
+            default: 64
+            color: eq
+          - type: button
+            name: Ch 1 Mute
+            control: 13
+            color: switch
+      - name: Channel 2
+        channel: 1
+        rows:
+          - name: Ch 2 Level
+            control: 2
+            default: 0
+            color: level
+          - name: Ch 2 Pan
+            control: 8
+            default: 64
+            color: pan
+            orientation: horizontal
+          - rows:
+              - name: Ch 2 Aux 1
+                control: 20
+                default: 0
+                color: send
+              - name: Ch 2 Aux 2
+                control: 26
+                default: 0
+                color: send
+              - name: Ch 2 EFX Send
+                control: 33
+                default: 0
+                color: send
+          - name: Ch 2 EQ Hi
+            control: 39
+            default: 64
+            color: eq
+          - name: Ch 2 EQ Mid Freq
+            control: 45
+            default: 64
+            color: eq
+          - name: Ch 2 EQ Mid
+            control: 51
+            default: 64
+            color: eq
+          - name: Ch 2 EQ Low
+            control: 57
+            default: 64
+            color: eq
+          - type: button
+            name: Ch 2 Mute
+            control: 14
+            color: switch
+      - name: Channel 3
+        channel: 1
+        rows:
+          - name: Ch 3 Level
+            control: 3
+            default: 0
+            color: level
+          - name: Ch 3 Pan
+            control: 9
+            default: 64
+            color: pan
+            orientation: horizontal
+          - rows:
+              - name: Ch 3 Aux 1
+                control: 21
+                default: 0
+                color: send
+              - name: Ch 3 Aux 2
+                control: 27
+                default: 0
+                color: send
+              - name: Ch 3 EFX Send
+                control: 34
+                default: 0
+                color: send
+          - name: Ch 3 EQ Hi
+            control: 40
+            default: 64
+            color: eq
+          - name: Ch 3 EQ Mid Freq
+            control: 46
+            default: 64
+            color: eq
+          - name: Ch 3 EQ Mid
+            control: 52
+            default: 64
+            color: eq
+          - name: Ch 3 EQ Low
+            control: 58
+            default: 64
+            color: eq
+          - type: button
+            name: Ch 3 Mute
+            control: 15
+            color: switch
+      - name: Channel 4
+        channel: 1
+        rows:
+          - name: Ch 4 Level
+            control: 4
+            default: 0
+            color: level
+          - name: Ch 4 Pan
+            control: 10
+            default: 64
+            color: pan
+            orientation: horizontal
+          - rows:
+              - name: Ch 4 Aux 1
+                control: 22
+                default: 0
+                color: send
+              - name: Ch 4 Aux 2
+                control: 28
+                default: 0
+                color: send
+              - name: Ch 4 EFX Send
+                control: 35
+                default: 0
+                color: send
+          - name: Ch 4 EQ Hi
+            control: 41
+            default: 64
+            color: eq
+          - name: Ch 4 EQ Mid Freq
+            control: 47
+            default: 64
+            color: eq
+          - name: Ch 4 EQ Mid
+            control: 53
+            default: 64
+            color: eq
+          - name: Ch 4 EQ Low
+            control: 59
+            default: 64
+            color: eq
+          - type: button
+            name: Ch 4 Mute
+            control: 16
+            color: switch
+      - name: Channel 5
+        channel: 1
+        rows:
+          - name: Ch 5 Level
+            control: 5
+            default: 0
+            color: level
+          - name: Ch 5 Pan
+            control: 11
+            default: 64
+            color: pan
+            orientation: horizontal
+          - rows:
+              - name: Ch 5 Aux 1
+                control: 23
+                default: 0
+                color: send
+              - name: Ch 5 Aux 2
+                control: 29
+                default: 0
+                color: send
+              - name: Ch 5 EFX Send
+                control: 36
+                default: 0
+                color: send
+          - name: Ch 5 EQ Hi
+            control: 42
+            default: 64
+            color: eq
+          - name: Ch 5 EQ Mid Freq
+            control: 48
+            default: 64
+            color: eq
+          - name: Ch 5 EQ Mid
+            control: 54
+            default: 64
+            color: eq
+          - name: Ch 5 EQ Low
+            control: 60
+            default: 64
+            color: eq
+          - type: button
+            name: Ch 5 Mute
+            control: 17
+            color: switch
+      - name: Channel 6
+        channel: 1
+        rows:
+          - name: Ch 6 Level
+            control: 6
+            default: 0
+            color: level
+          - name: Ch 6 Pan
+            control: 12
+            default: 64
+            color: pan
+            orientation: horizontal
+          - rows:
+              - name: Ch 6 Aux 1
+                control: 24
+                default: 0
+                color: send
+              - name: Ch 6 Aux 2
+                control: 30
+                default: 0
+                color: send
+              - name: Ch 6 EFX Send
+                control: 37
+                default: 0
+                color: send
+          - name: Ch 6 EQ Hi
+            control: 43
+            default: 64
+            color: eq
+          - name: Ch 6 EQ Mid Freq
+            control: 49
+            default: 64
+            color: eq
+          - name: Ch 6 EQ Mid
+            control: 55
+            default: 64
+            color: eq
+          - name: Ch 6 EQ Low
+            control: 61
+            default: 64
+            color: eq
+          - type: button
+            name: Ch 6 Mute
+            control: 18
+            color: switch
+  - height: 16%
+    channel: 1
+    columns:
+      - type: button
+        name: Ch 3 Mono x2
+        control: 62
+        color: switch
+      - type: button
+        name: Ch 4 Mono x2
+        control: 63
+        color: switch
+      - type: button
+        name: Ch 5 USB 1/2
+        control: 64
+        color: system
+      - type: button
+        name: Ch 6 USB 3/4
+        control: 65
+        color: system
+      - name: EFX Type
+        control: 66
+        steps: 5
+        default: 0
+        color: system
+      - type: button
+        name: Compressor
+        control: 67
+        color: switch

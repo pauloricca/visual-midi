@@ -11,6 +11,14 @@ palette:
   sand: "#c8a76a"
   plum: "#8a5a7c"
   teal: "#4f8f88"
+# palette:
+#   orange: "black"
+#   moss: "black"
+#   clay: "black"
+#   slate: "black"
+#   sand: "black"
+#   plum: "black"
+#   teal: "black"
 rows:
   - columns:
     - rows:
@@ -19,106 +27,34 @@ rows:
           control: 1
           default: 64
           color: sand
-          height: 50%
           osc:
             path: /waves/a/freq
             min: 20
             max: 20000
-        - rows:
-            - name: Filter peak
-              channel: 1
-              control: 2
-              default: 32
-              color: moss
-              orientation: horizontal
-              osc:
-                path: /visual/amp/a
-                min: 0
-                max: 1
-            - name: LFO Freq A
-              channel: 1
-              control: 3
-              default: 32
-              color: moss
-              orientation: horizontal
-            - name: LFO Amp A
-              channel: 1
-              control: 4
-              default: 32
-              color: moss
-              orientation: horizontal
     - rows:
         - type: lfo
           name: Fold
           complex: true
-          max_speed: 6
           channel: 1
           control: 11
           color: orange
-          height: 50%
+          quantize_speed: true
           min: 50
           max: 127
           osc:
             path: /visual/freq/b
             min: 20
             max: 20000
-        - rows:
-            - name: Amp B
-              channel: 1
-              control: 12
-              default: 32
-              color: plum
-              orientation: horizontal
-              osc:
-                path: /visual/amp/b
-                min: 0
-                max: 1
-            - name: LFO Freq B
-              channel: 1
-              control: 13
-              default: 32
-              color: plum
-              orientation: horizontal
-            - name: LFO Amp B
-              channel: 1
-              control: 14
-              default: 32
-              color: plum
-              orientation: horizontal
     - rows:
         - name: Fold bias
           channel: 1
           control: 21
           default: 64
           color: slate
-          height: 50%
           osc:
             path: /visual/freq/c
             min: 20
             max: 20000
-        - rows:
-            - name: Amp C
-              channel: 1
-              control: 22
-              default: 32
-              color: teal
-              orientation: horizontal
-              osc:
-                path: /visual/amp/c
-                min: 0
-                max: 1
-            - name: LFO Freq C
-              channel: 1
-              control: 23
-              default: 32
-              color: teal
-              orientation: horizontal
-            - name: LFO Amp C
-              channel: 1
-              control: 24
-              default: 32
-              color: teal
-              orientation: horizontal
     - tabs:
         - tab:
             name: Buttons
@@ -183,6 +119,37 @@ rows:
                     default: 24
                     color: moss
                     orientation: horizontal
+  - rows:
+    - name: Sequences
+      type: memory
+      target: sequencers
+      slots: 8
+      transition: 1
+      height: 20%
+      color: orange
+    - name: sequencers
+      width: 30%
+      rows:
+        - type: sequencer
+          name: Bass Seq
+          mode: notes
+          # control: 3
+          channel: 1
+          size: 8
+          subdivision: 1/8
+          root: C2
+          scale: minor
+          color: moss
+        - type: sequencer
+          name: Mid Seq
+          mode: notes
+          # control: 3
+          channel: 1
+          size: 32
+          subdivision: 1/8
+          root: C4
+          scale: minor
+          color: plum
   - height: 20%
     columns:
       - type: tempo
@@ -192,21 +159,10 @@ rows:
         max: 240
         default: 120
         color: clay
-      - type: sequencer
-        name: Bass Seq
-        mode: notes
-        # control: 3
-        channel: 1
-        size: 8
-        subdivision: 1/8
-        root: C2
-        scale: minor
-        color: sand
-        width: 30%
       - name: lead
         type: keyboard
         # size: 48
-        start: C3
+        start: C5
         size: 12
-        root: C4
+        root: C5
         scale: minor

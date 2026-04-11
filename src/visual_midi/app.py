@@ -34,6 +34,8 @@ SIZE_PATTERN = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(%|px)\s*$")
 NOTE_PATTERN = re.compile(r"^\s*([A-Ga-g])([#b]*)(-?\d+)\s*$")
 NOTE_BASES = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}
 SUBDIVISION_PATTERN = re.compile(r"^\s*(\d+)\s*/\s*(\d+)\s*$")
+LFO_WAVEFORMS = ("sine", "triangle", "square", "saw", "ramp", "random", "s&h")
+LFO_SHAPE_CONTROLS = ("waveform", "jitter")
 SCALE_PATTERNS = {
     "major": (0, 2, 4, 5, 7, 9, 11),
     "ionian": (0, 2, 4, 5, 7, 9, 11),
@@ -83,6 +85,9 @@ class SliderConfig:
     control_type: str = "slider"
     complex: bool = False
     max_speed: float = 12.0
+    quantize_speed_to_tempo_divisions: bool = False
+    lfo_waveforms: tuple[str, ...] = LFO_WAVEFORMS
+    lfo_shape_control: str = "waveform"
     default: int = 0
     minimum: int = 0
     maximum: int = 127
@@ -155,6 +160,9 @@ class SequencerConfig:
     maximum: int = 127
     root: int | None = None
     scale: str | None = None
+    velocity_row: bool = False
+    gate_row: bool = False
+    max_gate_steps: float = 1.0
     color: str = "#d26a2e"
     width: SizeSpec | None = None
     height: SizeSpec | None = None
@@ -173,6 +181,7 @@ class SequencerConfig:
 class GroupConfig:
     kind: str
     children: list["LayoutNode"]
+    name: str | None = None
     width: SizeSpec | None = None
     height: SizeSpec | None = None
 
@@ -186,17 +195,41 @@ class TabConfig:
 @dataclass(frozen=True)
 class TabsConfig:
     tabs: list[TabConfig]
+    name: str | None = None
     width: SizeSpec | None = None
     height: SizeSpec | None = None
 
 
-ControlConfig = Union[SliderConfig, KeyboardConfig, ButtonConfig, TempoConfig, SequencerConfig]
+@dataclass(frozen=True)
+class MemoryConfig:
+    name: str
+    target: str
+    slots: int
+    transition: float = 0.0
+    color: str = "#d26a2e"
+    width: SizeSpec | None = None
+    height: SizeSpec | None = None
+
+    @property
+    def state_key(self) -> str:
+        return f"memory:{self.name}"
+
+
+ControlConfig = Union[
+    SliderConfig,
+    KeyboardConfig,
+    ButtonConfig,
+    TempoConfig,
+    SequencerConfig,
+    MemoryConfig,
+]
 LayoutNode = Union[
     SliderConfig,
     KeyboardConfig,
     ButtonConfig,
     TempoConfig,
     SequencerConfig,
+    MemoryConfig,
     GroupConfig,
     TabsConfig,
 ]
@@ -211,6 +244,7 @@ class AppConfig:
     sliders: list[SliderConfig]
     tempo: TempoConfig | None = None
     sequencers: list[SequencerConfig] | None = None
+    memories: list[MemoryConfig] | None = None
     osc: "OscOutputConfig | None" = None
 
 
@@ -218,6 +252,20 @@ class AppConfig:
 class SequencerStepState:
     enabled: bool
     value: int
+    velocity: int = 127
+    gate: float = 1.0
+
+
+@dataclass
+class ActiveSequencerNote:
+    note: int
+    remaining_ticks: int
+
+
+@dataclass
+class MemorySlotState:
+    numeric: dict[str, float]
+    sequencers: dict[str, list[SequencerStepState]]
 
 
 @dataclass(frozen=True)
@@ -336,6 +384,10 @@ def build_web_server(*, runtime: "RuntimeState") -> ThreadingHTTPServer:
 
             if parsed.path == "/api/sequencer":
                 self.handle_sequencer_post()
+                return
+
+            if parsed.path == "/api/memory":
+                self.handle_memory_post()
                 return
 
             if parsed.path == "/api/transport":
@@ -478,6 +530,32 @@ def build_web_server(*, runtime: "RuntimeState") -> ThreadingHTTPServer:
             self.end_headers()
             self.wfile.write(payload)
 
+        def handle_memory_post(self) -> None:
+            parsed = urlparse(self.path)
+            content_length = int(self.headers.get("Content-Length", "0"))
+            raw = self.rfile.read(content_length)
+            try:
+                body = json.loads(raw.decode("utf-8"))
+                state_key = str(body["key"])
+                slot = int(body["slot"])
+                action = str(body["action"])
+                runtime.apply_memory_slot(state_key=state_key, slot=slot, action=action)
+            except (json.JSONDecodeError, KeyError, TypeError, ValueError, SystemExit) as exc:
+                self.send_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+
+            payload = json.dumps(
+                runtime.frontend_payload(
+                    hide_qr_panel="noqr" in parse_qs(parsed.query, keep_blank_values=True),
+                    port=self.server.server_address[1],
+                )
+            ).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
         def serve_static_file(self, relative_path: str) -> None:
             file_path = (STATIC_DIR / relative_path).resolve()
             if not str(file_path).startswith(str(STATIC_DIR.resolve())) or not file_path.exists():
@@ -552,6 +630,7 @@ def load_config(config_path: Path) -> AppConfig:
     sliders = collect_sliders(layout)
     tempo = collect_tempo(layout)
     sequencers = collect_sequencers(layout)
+    memories = collect_memories(layout)
     if count_controls(layout) == 0:
         raise SystemExit(f"Config {config_path} must contain at least one control")
     if layout_has_osc_routes(layout) and osc is None:
@@ -560,6 +639,7 @@ def load_config(config_path: Path) -> AppConfig:
         )
     if sequencers and tempo is None:
         raise SystemExit(f"Config {config_path} defines sequencers and requires a tempo control")
+    validate_memory_targets(layout, memories, config_path=config_path)
 
     return AppConfig(
         title=title,
@@ -569,6 +649,7 @@ def load_config(config_path: Path) -> AppConfig:
         sliders=sliders,
         tempo=tempo,
         sequencers=sequencers,
+        memories=memories,
         osc=osc,
     )
 
@@ -720,6 +801,7 @@ def parse_group(
     return GroupConfig(
         kind=kind,
         children=children,
+        name=parse_optional_name(raw.get("name"), config_path=config_path, path=f"{path}.name"),
         width=parse_size(raw.get("width"), config_path=config_path, path=f"{path}.width"),
         height=parse_size(raw.get("height"), config_path=config_path, path=f"{path}.height"),
     )
@@ -756,6 +838,7 @@ def parse_tabs(
 
     return TabsConfig(
         tabs=tabs,
+        name=parse_optional_name(raw.get("name"), config_path=config_path, path=f"{path}.name"),
         width=parse_size(raw.get("width"), config_path=config_path, path=f"{path}.width"),
         height=parse_size(raw.get("height"), config_path=config_path, path=f"{path}.height"),
     )
@@ -850,8 +933,16 @@ def parse_control(
             palette=palette,
             defaults=defaults,
         )
+    if control_type == "memory":
+        return parse_memory(
+            raw,
+            config_path=config_path,
+            path=path,
+            palette=palette,
+            defaults=defaults,
+        )
     raise SystemExit(
-        f"{config_path} {path}.type must be 'slider', 'lfo', 'keyboard', 'button', 'tempo', or 'sequencer'"
+        f"{config_path} {path}.type must be 'slider', 'lfo', 'keyboard', 'button', 'tempo', 'sequencer', or 'memory'"
     )
 
 
@@ -886,6 +977,27 @@ def parse_slider(
             )
             if control_type == "lfo"
             else 12.0,
+            quantize_speed_to_tempo_divisions=parse_boolean(
+                raw.get("quantize_speed", False),
+                config_path=config_path,
+                path=f"{path}.quantize_speed",
+            )
+            if control_type == "lfo"
+            else False,
+            lfo_waveforms=parse_lfo_waveforms(
+                raw.get("waveforms", LFO_WAVEFORMS),
+                config_path=config_path,
+                path=f"{path}.waveforms",
+            )
+            if control_type == "lfo"
+            else LFO_WAVEFORMS,
+            lfo_shape_control=parse_lfo_shape_control(
+                raw.get("shape_control", "waveform"),
+                config_path=config_path,
+                path=f"{path}.shape_control",
+            )
+            if control_type == "lfo"
+            else "waveform",
             name=str(raw["name"]),
             channel=validate_range(
                 int(raw.get("channel", defaults.channel)), 1, 16, f"{path}.channel", config_path
@@ -1059,6 +1171,27 @@ def parse_sequencer(
             ),
             root=parse_optional_midi_note(raw.get("root"), config_path=config_path, path=f"{path}.root"),
             scale=parse_scale_name(raw.get("scale"), config_path=config_path, path=f"{path}.scale"),
+            velocity_row=parse_optional_boolean_alias(
+                raw,
+                keys=("velocity", "vel", "v"),
+                default=False,
+                config_path=config_path,
+                path=path,
+            ),
+            gate_row=parse_optional_boolean_alias(
+                raw,
+                keys=("gate", "h"),
+                default=False,
+                config_path=config_path,
+                path=path,
+            ),
+            max_gate_steps=parse_positive_numeric_alias(
+                raw,
+                keys=("max_gate_steps", "max_gate", "gate_max"),
+                default=1.0,
+                config_path=config_path,
+                path=path,
+            ),
             color=resolve_color(
                 raw.get("color", defaults.color),
                 palette=palette,
@@ -1081,17 +1214,60 @@ def parse_sequencer(
         raise SystemExit(f"{config_path} {path} must define root when scale is set")
     if sequencer.root is not None and sequencer.scale is None:
         raise SystemExit(f"{config_path} {path} must define scale when root is set")
+    if sequencer.max_gate_steps < 1:
+        raise SystemExit(f"{config_path} {path}.max_gate_steps must be at least 1")
     if sequencer.mode == "notes":
         if sequencer.control is not None:
             raise SystemExit(f"{config_path} {path}.control is only valid for cc sequencers")
         if sequencer.osc is not None:
             raise SystemExit(f"{config_path} {path}.osc is only valid for cc sequencers")
     else:
+        if sequencer.velocity_row:
+            raise SystemExit(f"{config_path} {path}.velocity is only valid for note sequencers")
+        if sequencer.gate_row:
+            raise SystemExit(f"{config_path} {path}.gate is only valid for note sequencers")
+        if sequencer.max_gate_steps != 1.0:
+            raise SystemExit(f"{config_path} {path}.max_gate_steps is only valid for note sequencers")
         if sequencer.control is None and sequencer.osc is None:
             raise SystemExit(f"{config_path} {path} cc sequencers require control and/or osc")
         if sequencer.root is not None or sequencer.scale is not None:
             raise SystemExit(f"{config_path} {path} root/scale are only valid for note sequencers")
     return sequencer
+
+
+def parse_memory(
+    raw: dict[str, Any],
+    *,
+    config_path: Path,
+    path: str,
+    palette: dict[str, str],
+    defaults: LayoutDefaults,
+) -> MemoryConfig:
+    try:
+        target = parse_optional_name(raw["target"], config_path=config_path, path=f"{path}.target")
+        if target is None:
+            raise SystemExit(f"{config_path} {path}.target must be a non-empty string")
+        return MemoryConfig(
+            name=str(raw["name"]),
+            target=target,
+            slots=parse_keyboard_size(raw["slots"], config_path=config_path, path=f"{path}.slots"),
+            transition=parse_inertia(
+                raw.get("transition", 0.0),
+                config_path=config_path,
+                path=f"{path}.transition",
+            ),
+            color=resolve_color(
+                raw.get("color", defaults.color),
+                palette=palette,
+                config_path=config_path,
+                path=f"{path}.color",
+            ),
+            width=parse_size(raw.get("width"), config_path=config_path, path=f"{path}.width"),
+            height=parse_size(raw.get("height"), config_path=config_path, path=f"{path}.height"),
+        )
+    except KeyError as exc:
+        missing = exc.args[0]
+        raise SystemExit(f"{config_path} {path} is missing '{missing}'") from exc
 
 
 def parse_layout_defaults(
@@ -1205,6 +1381,35 @@ def parse_nonnegative_speed(raw: Any, *, config_path: Path, path: str) -> float:
     return value
 
 
+def parse_lfo_waveforms(raw: Any, *, config_path: Path, path: str) -> tuple[str, ...]:
+    if not isinstance(raw, (list, tuple)) or not raw:
+        raise SystemExit(
+            f"{config_path} {path} must be a non-empty list of: {', '.join(LFO_WAVEFORMS)}"
+        )
+
+    waveforms: list[str] = []
+    for index, item in enumerate(raw):
+        if not isinstance(item, str) or not item.strip():
+            raise SystemExit(f"{config_path} {path}[{index}] must be a non-empty string")
+        waveform = item.strip().lower().replace("-", "_").replace(" ", "_")
+        if waveform not in LFO_WAVEFORMS:
+            raise SystemExit(
+                f"{config_path} {path}[{index}] must be one of: {', '.join(LFO_WAVEFORMS)}"
+            )
+        if waveform not in waveforms:
+            waveforms.append(waveform)
+    return tuple(waveforms)
+
+
+def parse_lfo_shape_control(raw: Any, *, config_path: Path, path: str) -> str:
+    if not isinstance(raw, str) or not raw.strip():
+        raise SystemExit(f"{config_path} {path} must be 'waveform' or 'jitter'")
+    value = raw.strip().lower().replace("-", "_").replace(" ", "_")
+    if value not in LFO_SHAPE_CONTROLS:
+        raise SystemExit(f"{config_path} {path} must be 'waveform' or 'jitter'")
+    return value
+
+
 def parse_steps(raw: Any, *, config_path: Path, path: str) -> int | None:
     if raw is None:
         return None
@@ -1275,6 +1480,14 @@ def parse_scale_name(raw: Any, *, config_path: Path, path: str) -> str | None:
     return normalized
 
 
+def parse_optional_name(raw: Any, *, config_path: Path, path: str) -> str | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, str) or not raw.strip():
+        raise SystemExit(f"{config_path} {path} must be a non-empty string")
+    return raw.strip()
+
+
 def normalize_scale_name(value: str) -> str:
     return value.strip().lower().replace("-", "_").replace(" ", "_")
 
@@ -1337,7 +1550,7 @@ def parse_size(value: Any, *, config_path: Path, path: str) -> SizeSpec | None:
 def collect_sliders(node: LayoutNode) -> list[SliderConfig]:
     if isinstance(node, SliderConfig):
         return [node]
-    if isinstance(node, (KeyboardConfig, ButtonConfig, TempoConfig, SequencerConfig)):
+    if isinstance(node, (KeyboardConfig, ButtonConfig, TempoConfig, SequencerConfig, MemoryConfig)):
         return []
     if isinstance(node, TabsConfig):
         sliders: list[SliderConfig] = []
@@ -1354,7 +1567,7 @@ def collect_sliders(node: LayoutNode) -> list[SliderConfig]:
 def collect_buttons_by_key(node: LayoutNode) -> dict[str, ButtonConfig]:
     if isinstance(node, ButtonConfig):
         return {node.state_key: node}
-    if isinstance(node, (SliderConfig, KeyboardConfig, TempoConfig, SequencerConfig)):
+    if isinstance(node, (SliderConfig, KeyboardConfig, TempoConfig, SequencerConfig, MemoryConfig)):
         return {}
     if isinstance(node, TabsConfig):
         buttons: dict[str, ButtonConfig] = {}
@@ -1371,7 +1584,7 @@ def collect_buttons_by_key(node: LayoutNode) -> dict[str, ButtonConfig]:
 def collect_tempo(node: LayoutNode) -> TempoConfig | None:
     if isinstance(node, TempoConfig):
         return node
-    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, SequencerConfig)):
+    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, SequencerConfig, MemoryConfig)):
         return None
     if isinstance(node, TabsConfig):
         found: TempoConfig | None = None
@@ -1398,7 +1611,7 @@ def collect_tempo(node: LayoutNode) -> TempoConfig | None:
 def collect_sequencers(node: LayoutNode) -> list[SequencerConfig]:
     if isinstance(node, SequencerConfig):
         return [node]
-    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, TempoConfig)):
+    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, TempoConfig, MemoryConfig)):
         return []
     if isinstance(node, TabsConfig):
         sequencers: list[SequencerConfig] = []
@@ -1412,8 +1625,25 @@ def collect_sequencers(node: LayoutNode) -> list[SequencerConfig]:
     return sequencers
 
 
-def count_controls(node: LayoutNode) -> int:
+def collect_memories(node: LayoutNode) -> list[MemoryConfig]:
+    if isinstance(node, MemoryConfig):
+        return [node]
     if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, TempoConfig, SequencerConfig)):
+        return []
+    if isinstance(node, TabsConfig):
+        memories: list[MemoryConfig] = []
+        for tab in node.tabs:
+            memories.extend(collect_memories(tab.content))
+        return memories
+
+    memories: list[MemoryConfig] = []
+    for child in node.children:
+        memories.extend(collect_memories(child))
+    return memories
+
+
+def count_controls(node: LayoutNode) -> int:
+    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, TempoConfig, SequencerConfig, MemoryConfig)):
         return 1
     if isinstance(node, TabsConfig):
         return sum(count_controls(tab.content) for tab in node.tabs)
@@ -1431,9 +1661,63 @@ def layout_has_osc_routes(node: LayoutNode) -> bool:
         return False
     if isinstance(node, SequencerConfig):
         return node.osc is not None
+    if isinstance(node, MemoryConfig):
+        return False
     if isinstance(node, TabsConfig):
         return any(layout_has_osc_routes(tab.content) for tab in node.tabs)
     return any(layout_has_osc_routes(child) for child in node.children)
+
+
+def validate_memory_targets(
+    layout: LayoutNode, memories: list[MemoryConfig], *, config_path: Path
+) -> None:
+    for memory in memories:
+        target = resolve_memory_target(layout, memory.target)
+        if target is None:
+            raise SystemExit(
+                f"{config_path} memory '{memory.name}' target '{memory.target}' does not match any named control or container"
+            )
+        if not target_has_recallable_state(target):
+            raise SystemExit(
+                f"{config_path} memory '{memory.name}' target '{memory.target}' has no recallable controls"
+            )
+
+
+def resolve_memory_target(node: LayoutNode, target: str) -> LayoutNode | None:
+    matches: list[LayoutNode] = []
+    collect_memory_target_matches(node, target.strip(), matches)
+    if not matches:
+        return None
+    if len(matches) > 1:
+        raise SystemExit(f"Memory target '{target}' is ambiguous; names must be unique")
+    return matches[0]
+
+
+def collect_memory_target_matches(node: LayoutNode, target: str, matches: list[LayoutNode]) -> None:
+    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, TempoConfig, SequencerConfig, MemoryConfig)):
+        if getattr(node, "name", None) == target:
+            matches.append(node)
+        return
+    if isinstance(node, TabsConfig):
+        if node.name == target:
+            matches.append(node)
+        for tab in node.tabs:
+            collect_memory_target_matches(tab.content, target, matches)
+        return
+    if node.name == target:
+        matches.append(node)
+    for child in node.children:
+        collect_memory_target_matches(child, target, matches)
+
+
+def target_has_recallable_state(node: LayoutNode) -> bool:
+    if isinstance(node, (SliderConfig, TempoConfig, SequencerConfig)):
+        return True
+    if isinstance(node, (KeyboardConfig, ButtonConfig, MemoryConfig)):
+        return False
+    if isinstance(node, TabsConfig):
+        return any(target_has_recallable_state(tab.content) for tab in node.tabs)
+    return any(target_has_recallable_state(child) for child in node.children)
 
 
 def validate_range(value: int, minimum: int, maximum: int, field: str, config_path: Path) -> int:
@@ -1446,6 +1730,38 @@ def parse_boolean(raw: Any, *, config_path: Path, path: str) -> bool:
     if isinstance(raw, bool):
         return raw
     raise SystemExit(f"{config_path} {path} must be true or false")
+
+
+def parse_optional_boolean_alias(
+    raw: dict[str, Any],
+    *,
+    keys: tuple[str, ...],
+    default: bool,
+    config_path: Path,
+    path: str,
+) -> bool:
+    for key in keys:
+        if key in raw:
+            return parse_boolean(raw[key], config_path=config_path, path=f"{path}.{key}")
+    return default
+
+
+def parse_positive_numeric_alias(
+    raw: dict[str, Any],
+    *,
+    keys: tuple[str, ...],
+    default: float,
+    config_path: Path,
+    path: str,
+) -> float:
+    for key in keys:
+        if key not in raw:
+            continue
+        value = parse_numeric_value(raw[key], config_path=config_path, path=f"{path}.{key}")
+        if value <= 0:
+            raise SystemExit(f"{config_path} {path}.{key} must be greater than 0")
+        return value
+    return default
 
 
 def load_raw_state(state_path: Path) -> dict[str, Any]:
@@ -1488,9 +1804,97 @@ def load_sequencer_state(raw_state: dict[str, Any]) -> dict[str, list[SequencerS
             if isinstance(raw_value, bool) or not isinstance(raw_value, (int, float)):
                 valid = False
                 break
-            steps.append(SequencerStepState(enabled=enabled, value=int(raw_value)))
+            raw_velocity = item.get("velocity", 127)
+            raw_gate = item.get("gate", 1.0)
+            if isinstance(raw_velocity, bool) or not isinstance(raw_velocity, (int, float)):
+                valid = False
+                break
+            if isinstance(raw_gate, bool) or not isinstance(raw_gate, (int, float)):
+                valid = False
+                break
+            steps.append(
+                SequencerStepState(
+                    enabled=enabled,
+                    value=int(raw_value),
+                    velocity=int(raw_velocity),
+                    gate=float(raw_gate),
+                )
+            )
         if valid:
             state[key] = steps
+    return state
+
+
+def load_memory_state(raw_state: dict[str, Any]) -> dict[str, list[MemorySlotState | None]]:
+    state: dict[str, list[MemorySlotState | None]] = {}
+    for key, value in raw_state.items():
+        if not isinstance(value, dict):
+            continue
+        raw_slots = value.get("slots")
+        if not isinstance(raw_slots, list):
+            continue
+        slots: list[MemorySlotState | None] = []
+        valid = True
+        for raw_slot in raw_slots:
+            if raw_slot is None:
+                slots.append(None)
+                continue
+            if not isinstance(raw_slot, dict):
+                valid = False
+                break
+            raw_numeric = raw_slot.get("numeric", {})
+            raw_sequencers = raw_slot.get("sequencers", {})
+            if not isinstance(raw_numeric, dict) or not isinstance(raw_sequencers, dict):
+                valid = False
+                break
+
+            numeric: dict[str, float] = {}
+            for slot_key, slot_value in raw_numeric.items():
+                if isinstance(slot_value, bool) or not isinstance(slot_value, (int, float)):
+                    valid = False
+                    break
+                numeric[str(slot_key)] = float(slot_value)
+            if not valid:
+                break
+
+            sequencers: dict[str, list[SequencerStepState]] = {}
+            for sequencer_key, sequencer_steps in raw_sequencers.items():
+                if not isinstance(sequencer_steps, list):
+                    valid = False
+                    break
+                normalized_steps: list[SequencerStepState] = []
+                for item in sequencer_steps:
+                    if not isinstance(item, dict):
+                        valid = False
+                        break
+                    raw_value = item.get("value", 0)
+                    if isinstance(raw_value, bool) or not isinstance(raw_value, (int, float)):
+                        valid = False
+                        break
+                    raw_velocity = item.get("velocity", 127)
+                    raw_gate = item.get("gate", 1.0)
+                    if isinstance(raw_velocity, bool) or not isinstance(raw_velocity, (int, float)):
+                        valid = False
+                        break
+                    if isinstance(raw_gate, bool) or not isinstance(raw_gate, (int, float)):
+                        valid = False
+                        break
+                    normalized_steps.append(
+                        SequencerStepState(
+                            enabled=bool(item.get("enabled", False)),
+                            value=int(raw_value),
+                            velocity=int(raw_velocity),
+                            gate=float(raw_gate),
+                        )
+                    )
+                if not valid:
+                    break
+                sequencers[str(sequencer_key)] = normalized_steps
+            if not valid:
+                break
+            slots.append(MemorySlotState(numeric=numeric, sequencers=sequencers))
+        if valid:
+            state[str(key)] = slots
     return state
 
 
@@ -1602,6 +2006,7 @@ class RuntimeState:
         raw_state = load_raw_state(state_path)
         self._state = load_numeric_state(raw_state)
         self._sequencer_state = load_sequencer_state(raw_state)
+        self._memory_state = load_memory_state(raw_state)
         self._last_midi_values: dict[str, int] = {}
         self._active_notes: dict[tuple[int, int], int] = {}
         self._active_buttons: dict[str, int] = {}
@@ -1609,9 +2014,12 @@ class RuntimeState:
         self._buttons_by_key = collect_buttons_by_key(config.layout)
         self._sequencers = config.sequencers or []
         self._sequencers_by_key = {sequencer.state_key: sequencer for sequencer in self._sequencers}
+        self._memories = config.memories or []
+        self._memories_by_key = {memory.state_key: memory for memory in self._memories}
+        self._transition_generation: dict[str, int] = {}
         self._sequencer_positions = {sequencer.state_key: -1 for sequencer in self._sequencers}
         self._sequencer_tick_progress = {sequencer.state_key: 0.0 for sequencer in self._sequencers}
-        self._active_sequencer_notes: dict[str, int] = {}
+        self._active_sequencer_notes: dict[str, ActiveSequencerNote] = {}
         self._tempo = config.tempo
         self._tempo_bpm = 120.0
         if self._tempo is not None:
@@ -1738,6 +2146,25 @@ class RuntimeState:
         with self.lock:
             return self._sequencer_positions.get(state_key, -1)
 
+    def apply_memory_slot(self, *, state_key: str, slot: int, action: str) -> None:
+        self.reload_if_needed()
+        with self.lock:
+            memory = self._memories_by_key.get(state_key)
+            if memory is None:
+                raise ValueError(f"Unknown memory key: {state_key}")
+            if not 0 <= slot < memory.slots:
+                raise ValueError(f"Slot {slot} is out of range for memory '{memory.name}'")
+            if action == "save":
+                self._save_memory_slot_locked(memory, slot)
+                return
+            if action == "recall":
+                self._recall_memory_slot_locked(memory, slot)
+                return
+            if action == "clear":
+                self._clear_memory_slot_locked(memory, slot)
+                return
+            raise ValueError(f"Unsupported memory action: {action}")
+
     def frontend_payload(self, *, hide_qr_panel: bool, port: int) -> dict[str, Any]:
         self.reload_if_needed()
         config = self.current_config()
@@ -1818,6 +2245,13 @@ class RuntimeState:
             self._sequencers_by_key = {
                 sequencer.state_key: sequencer for sequencer in self._sequencers
             }
+            self._memories = new_config.memories or []
+            self._memories_by_key = {memory.state_key: memory for memory in self._memories}
+            self._transition_generation = {
+                key: generation
+                for key, generation in self._transition_generation.items()
+                if key in self._sliders_by_key
+            }
             self._tempo = new_config.tempo
             self._active_buttons = {}
             self._reconcile_state()
@@ -1856,6 +2290,9 @@ class RuntimeState:
                 "name": node.name,
                 "complex": node.complex,
                 "maxSpeed": normalize_numeric_value(node.max_speed),
+                "quantizeSpeedToTempoDivisions": node.quantize_speed_to_tempo_divisions,
+                "waveforms": list(node.lfo_waveforms),
+                "shapeControl": node.lfo_shape_control,
                 "value": value,
                 "channel": node.channel,
                 "control": node.control,
@@ -1911,6 +2348,9 @@ class RuntimeState:
                 "max": node.maximum,
                 "root": node.root,
                 "scale": node.scale,
+                "velocityRow": node.velocity_row,
+                "gateRow": node.gate_row,
+                "maxGateSteps": normalize_numeric_value(node.max_gate_steps),
                 "color": node.color,
                 "width": serialize_size(node.width),
                 "height": serialize_size(node.height),
@@ -1930,9 +2370,23 @@ class RuntimeState:
                 "height": serialize_size(node.height),
                 "osc": serialize_osc_route(node.osc),
             }
+        if isinstance(node, MemoryConfig):
+            slots = self._memory_state.get(node.state_key, [])
+            return {
+                "type": "memory",
+                "key": node.state_key,
+                "name": node.name,
+                "target": node.target,
+                "transition": normalize_numeric_value(node.transition),
+                "slots": [slot is not None for slot in slots[: node.slots]] + [False] * max(0, node.slots - len(slots)),
+                "color": node.color,
+                "width": serialize_size(node.width),
+                "height": serialize_size(node.height),
+            }
         if isinstance(node, TabsConfig):
             return {
                 "type": "tabs",
+                "name": node.name,
                 "width": serialize_size(node.width),
                 "height": serialize_size(node.height),
                 "tabs": [
@@ -1942,6 +2396,7 @@ class RuntimeState:
 
         return {
             "type": "rows" if node.kind == "row" else "columns",
+            "name": node.name,
             "width": serialize_size(node.width),
             "height": serialize_size(node.height),
             "children": [self._serialize_layout(child) for child in node.children],
@@ -1976,11 +2431,18 @@ class RuntimeState:
         self._sequencer_state = live_sequences
         self._sequencer_positions = positions
         self._sequencer_tick_progress = progress
+        live_memories: dict[str, list[MemorySlotState | None]] = {}
+        for memory in self._memories:
+            live_memories[memory.state_key] = self._normalize_memory_slots_locked(memory)
+        self._memory_state = live_memories
         if self._tempo is not None:
             self._tempo_bpm = self._state[self._tempo.state_key]
         self._save_state_locked()
 
     def _update_slider_locked(self, slider: SliderConfig, value: float, *, force_midi: bool = False) -> None:
+        self._transition_generation[slider.state_key] = (
+            self._transition_generation.get(slider.state_key, 0) + 1
+        )
         bounded = quantize_slider_value(slider, value)
         self._state[slider.state_key] = bounded
         self._save_state_locked()
@@ -2012,6 +2474,7 @@ class RuntimeState:
 
     def _handle_transport_tick(self) -> None:
         with self.lock:
+            self._tick_active_sequencer_notes_locked()
             for sequencer in self._sequencers:
                 if sequencer.size <= 0:
                     continue
@@ -2023,6 +2486,132 @@ class RuntimeState:
                     self._sequencer_tick_progress[state_key] -= sequencer.ticks_per_step
                     self._advance_sequencer_locked(sequencer)
 
+    def _normalize_memory_slots_locked(self, memory: MemoryConfig) -> list[MemorySlotState | None]:
+        slots = list(self._memory_state.get(memory.state_key, []))
+        normalized = slots[: memory.slots]
+        if len(normalized) < memory.slots:
+            normalized.extend([None] * (memory.slots - len(normalized)))
+        return normalized
+
+    def _save_memory_slot_locked(self, memory: MemoryConfig, slot_index: int) -> None:
+        target = resolve_memory_target(self._config.layout, memory.target)
+        if target is None:
+            raise ValueError(f"Unknown memory target: {memory.target}")
+        slots = self._normalize_memory_slots_locked(memory)
+        slots[slot_index] = self._capture_memory_slot_locked(target)
+        self._memory_state[memory.state_key] = slots
+        self._save_state_locked()
+
+    def _recall_memory_slot_locked(self, memory: MemoryConfig, slot_index: int) -> None:
+        slots = self._normalize_memory_slots_locked(memory)
+        slot = slots[slot_index]
+        if slot is None:
+            return
+        slider_transitions: list[tuple[SliderConfig, float, float, int]] = []
+        for key, value in slot.numeric.items():
+            slider = self._sliders_by_key.get(key)
+            if slider is not None:
+                current_value = self._state.get(slider.state_key, float(slider.default))
+                bounded = quantize_slider_value(slider, value)
+                if memory.transition > 0 and current_value != bounded:
+                    self._state[slider.state_key] = bounded
+                    generation = self._transition_generation.get(slider.state_key, 0) + 1
+                    self._transition_generation[slider.state_key] = generation
+                    slider_transitions.append((slider, current_value, bounded, generation))
+                else:
+                    self._transition_generation[slider.state_key] = (
+                        self._transition_generation.get(slider.state_key, 0) + 1
+                    )
+                    self._update_slider_locked(slider, value, force_midi=True)
+                continue
+            if self._tempo is not None and key == self._tempo.state_key:
+                self._update_tempo_locked(value)
+        for key, steps in slot.sequencers.items():
+            sequencer = self._sequencers_by_key.get(key)
+            if sequencer is None:
+                continue
+            self._sequencer_state[key] = normalize_sequencer_steps(
+                sequencer,
+                steps,
+                config_path=self.config_path,
+                path=Path(key),
+            )
+        self._save_state_locked()
+        if slider_transitions:
+            self._start_slider_transition_locked(slider_transitions, duration=memory.transition)
+
+    def _clear_memory_slot_locked(self, memory: MemoryConfig, slot_index: int) -> None:
+        slots = self._normalize_memory_slots_locked(memory)
+        slots[slot_index] = None
+        self._memory_state[memory.state_key] = slots
+        self._save_state_locked()
+
+    def _start_slider_transition_locked(
+        self,
+        transitions: list[tuple[SliderConfig, float, float, int]],
+        *,
+        duration: float,
+    ) -> None:
+        transition_items = list(transitions)
+
+        def run_transition() -> None:
+            started_at = time.monotonic()
+            frame_interval = 1.0 / 60.0
+            while True:
+                elapsed = time.monotonic() - started_at
+                progress = min(1.0, elapsed / max(duration, 0.001))
+                with self.lock:
+                    for slider, start_value, end_value, generation in transition_items:
+                        if self._transition_generation.get(slider.state_key) != generation:
+                            continue
+                        value = start_value + ((end_value - start_value) * progress)
+                        quantized = quantize_slider_value(slider, value)
+                        self._send_midi_value(slider, quantized, force=progress >= 1.0)
+                        self._send_osc_value(slider, quantized)
+                if progress >= 1.0:
+                    return
+                time.sleep(frame_interval)
+
+        Thread(target=run_transition, name="visual-midi-memory-transition", daemon=True).start()
+
+    def _capture_memory_slot_locked(self, node: LayoutNode) -> MemorySlotState:
+        numeric: dict[str, float] = {}
+        sequencers: dict[str, list[SequencerStepState]] = {}
+        self._collect_recallable_state_locked(node, numeric, sequencers)
+        return MemorySlotState(numeric=numeric, sequencers=sequencers)
+
+    def _collect_recallable_state_locked(
+        self,
+        node: LayoutNode,
+        numeric: dict[str, float],
+        sequencers: dict[str, list[SequencerStepState]],
+    ) -> None:
+        if isinstance(node, SliderConfig):
+            numeric[node.state_key] = self._state.get(node.state_key, float(node.default))
+            return
+        if isinstance(node, TempoConfig):
+            numeric[node.state_key] = self._tempo_bpm
+            return
+        if isinstance(node, SequencerConfig):
+            sequencers[node.state_key] = [
+                SequencerStepState(
+                    enabled=step.enabled,
+                    value=step.value,
+                    velocity=step.velocity,
+                    gate=step.gate,
+                )
+                for step in self._sequencer_state.get(node.state_key, [])
+            ]
+            return
+        if isinstance(node, (KeyboardConfig, ButtonConfig, MemoryConfig)):
+            return
+        if isinstance(node, TabsConfig):
+            for tab in node.tabs:
+                self._collect_recallable_state_locked(tab.content, numeric, sequencers)
+            return
+        for child in node.children:
+            self._collect_recallable_state_locked(child, numeric, sequencers)
+
     def _save_state_locked(self) -> None:
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
         with self.state_path.open("w", encoding="utf-8") as handle:
@@ -2032,6 +2621,26 @@ class RuntimeState:
                     **{
                         key: serialize_sequencer_steps(steps)
                         for key, steps in self._sequencer_state.items()
+                    },
+                    **{
+                        key: {
+                            "slots": [
+                                None
+                                if slot is None
+                                else {
+                                    "numeric": {
+                                        slot_key: normalize_numeric_value(slot_value)
+                                        for slot_key, slot_value in slot.numeric.items()
+                                    },
+                                    "sequencers": {
+                                        sequencer_key: serialize_sequencer_steps(sequencer_steps)
+                                        for sequencer_key, sequencer_steps in slot.sequencers.items()
+                                    },
+                                }
+                                for slot in slots
+                            ]
+                        }
+                        for key, slots in self._memory_state.items()
                     },
                 },
                 handle,
@@ -2083,6 +2692,20 @@ class RuntimeState:
             return
         self._active_notes[note_key] = count - 1
 
+    def _send_note_on_locked(self, *, channel: int, note: int, velocity: int) -> None:
+        note_key = (channel, note)
+        count = self._active_notes.get(note_key, 0)
+        self._active_notes[note_key] = count + 1
+        if count > 0:
+            return
+        message = mido.Message(
+            "note_on",
+            channel=channel - 1,
+            note=note,
+            velocity=validate_range(velocity, 0, 127, "velocity", self.config_path),
+        )
+        self._midi_out.send(message)
+
     def _silence_active_notes_locked(self) -> None:
         for (channel, note), _count in list(self._active_notes.items()):
             message = mido.Message("note_off", channel=channel - 1, note=note, velocity=0)
@@ -2102,30 +2725,51 @@ class RuntimeState:
         step = steps[next_index]
         if sequencer.mode == "notes":
             note = step.value if step.enabled else None
-            self._send_sequencer_note_locked(sequencer, note)
+            velocity = step.velocity if step.enabled else 127
+            gate_ticks = sequencer_gate_ticks(sequencer, step.gate) if step.enabled else 0
+            self._send_sequencer_note_locked(sequencer, note, velocity, gate_ticks)
             return
         if step.enabled:
             self._send_sequencer_cc_locked(sequencer, step.value)
             self._send_sequencer_osc_locked(sequencer, step.value)
 
-    def _send_sequencer_note_locked(self, sequencer: SequencerConfig, note: int | None) -> None:
+    def _send_sequencer_note_locked(
+        self,
+        sequencer: SequencerConfig,
+        note: int | None,
+        velocity: int = 127,
+        gate_ticks: int = 0,
+    ) -> None:
         current = self._active_sequencer_notes.get(sequencer.state_key)
-        if current == note:
-            return
         if current is not None:
-            self._send_note_gate_locked(channel=sequencer.channel, note=current, gate=False)
+            self._send_note_gate_locked(channel=sequencer.channel, note=current.note, gate=False)
             self._active_sequencer_notes.pop(sequencer.state_key, None)
         if note is None:
             return
-        self._send_note_gate_locked(channel=sequencer.channel, note=note, gate=True)
-        self._active_sequencer_notes[sequencer.state_key] = note
+        self._send_note_on_locked(channel=sequencer.channel, note=note, velocity=velocity)
+        self._active_sequencer_notes[sequencer.state_key] = ActiveSequencerNote(
+            note=note,
+            remaining_ticks=max(1, gate_ticks),
+        )
+
+    def _tick_active_sequencer_notes_locked(self) -> None:
+        for state_key, active in list(self._active_sequencer_notes.items()):
+            sequencer = self._sequencers_by_key.get(state_key)
+            if sequencer is None:
+                self._active_sequencer_notes.pop(state_key, None)
+                continue
+            active.remaining_ticks -= 1
+            if active.remaining_ticks > 0:
+                continue
+            self._send_note_gate_locked(channel=sequencer.channel, note=active.note, gate=False)
+            self._active_sequencer_notes.pop(state_key, None)
 
     def _silence_active_sequencer_notes_locked(self) -> None:
-        for state_key, note in list(self._active_sequencer_notes.items()):
+        for state_key, active in list(self._active_sequencer_notes.items()):
             sequencer = self._sequencers_by_key.get(state_key)
             if sequencer is None:
                 continue
-            self._send_note_gate_locked(channel=sequencer.channel, note=note, gate=False)
+            self._send_note_gate_locked(channel=sequencer.channel, note=active.note, gate=False)
         self._active_sequencer_notes.clear()
 
     def _silence_active_buttons_locked(self) -> None:
@@ -2294,6 +2938,8 @@ def normalize_sequencer_steps(
                 SequencerStepState(
                     enabled=bool(raw_step.enabled),
                     value=quantize_sequencer_value(sequencer, float(raw_step.value)),
+                    velocity=quantize_sequencer_velocity(raw_step.velocity),
+                    gate=quantize_sequencer_gate(sequencer, raw_step.gate),
                 )
             )
             continue
@@ -2302,10 +2948,18 @@ def normalize_sequencer_steps(
         raw_value = raw_step.get("value", default_value)
         if isinstance(raw_value, bool) or not isinstance(raw_value, (int, float)):
             raise SystemExit(f"{config_path} {path}[{index}].value must be a number")
+        raw_velocity = raw_step.get("velocity", 127)
+        if isinstance(raw_velocity, bool) or not isinstance(raw_velocity, (int, float)):
+            raise SystemExit(f"{config_path} {path}[{index}].velocity must be a number")
+        raw_gate = raw_step.get("gate", 1.0)
+        if isinstance(raw_gate, bool) or not isinstance(raw_gate, (int, float)):
+            raise SystemExit(f"{config_path} {path}[{index}].gate must be a number")
         steps.append(
             SequencerStepState(
                 enabled=bool(raw_step.get("enabled", False)),
                 value=quantize_sequencer_value(sequencer, float(raw_value)),
+                velocity=quantize_sequencer_velocity(raw_velocity),
+                gate=quantize_sequencer_gate(sequencer, raw_gate),
             )
         )
     return steps
@@ -2338,9 +2992,27 @@ def quantize_sequencer_value(sequencer: SequencerConfig, value: float) -> int:
     return best_note
 
 
+def quantize_sequencer_velocity(value: float) -> int:
+    return int(round(clamp_numeric_value(value, minimum=1, maximum=127)))
+
+
+def quantize_sequencer_gate(sequencer: SequencerConfig, value: float) -> float:
+    bounded = clamp_numeric_value(value, minimum=0.05, maximum=sequencer.max_gate_steps)
+    return round(bounded * 100.0) / 100.0
+
+
+def sequencer_gate_ticks(sequencer: SequencerConfig, gate: float) -> int:
+    return max(1, int(round(quantize_sequencer_gate(sequencer, gate) * sequencer.ticks_per_step)))
+
+
 def serialize_sequencer_steps(steps: list[SequencerStepState]) -> list[dict[str, Any]]:
     return [
-        {"enabled": step.enabled, "value": normalize_numeric_value(step.value)}
+        {
+            "enabled": step.enabled,
+            "value": normalize_numeric_value(step.value),
+            "velocity": normalize_numeric_value(step.velocity),
+            "gate": normalize_numeric_value(step.gate),
+        }
         for step in steps
     ]
 

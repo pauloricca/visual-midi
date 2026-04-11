@@ -75,7 +75,7 @@ a,
 }
 
 .layout-group {
-  display: flex;
+  display: grid;
   width: 100%;
   height: 100%;
   min-width: 0;
@@ -83,33 +83,16 @@ a,
 }
 
 .layout-group > * {
-  flex: 1 1 0;
   min-width: 0;
   min-height: 0;
 }
 
 .layout-group--rows {
-  flex-direction: column;
+  grid-auto-flow: row;
 }
 
 .layout-group--columns {
-  flex-direction: row;
-}
-
-.layout-group--rows > [data-height$="%"] {
-  flex: 0 0 var(--node-height);
-}
-
-.layout-group--rows > [data-height$="px"] {
-  flex: 0 0 var(--node-height);
-}
-
-.layout-group--columns > [data-width$="%"] {
-  flex: 0 0 var(--node-width);
-}
-
-.layout-group--columns > [data-width$="px"] {
-  flex: 0 0 var(--node-width);
+  grid-auto-flow: column;
 }
 
 .layout-tabs {
@@ -344,6 +327,7 @@ a,
   line-height: 1;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+  text-align: center;
 }
 
 .keyboard-control {
@@ -401,7 +385,7 @@ a,
   flex: 1 1 0;
   height: 100%;
   background: color-mix(in srgb, var(--keyboard-accent) 18%, white);
-  border-right: 4px solid color-mix(in srgb, var(--keyboard-accent) 14%, black);
+  border-right: 1px solid color-mix(in srgb, var(--keyboard-accent) 14%, black);
 }
 
 .keyboard-key--white:last-child {
@@ -414,7 +398,7 @@ a,
   height: 62%;
   transform: translateX(-50%);
   background: color-mix(in srgb, var(--keyboard-accent) 72%, black);
-  border: 4px solid color-mix(in srgb, var(--keyboard-accent) 24%, black);
+  border: 1px solid color-mix(in srgb, var(--keyboard-accent) 24%, black);
   border-top: 0;
   pointer-events: auto;
   z-index: 2;
@@ -507,7 +491,7 @@ a,
 }
 
 .button-control.is-active {
-  background: color-mix(in srgb, var(--button-accent) 52%, white);
+  background: color-mix(in srgb, var(--button-accent) 85%, white);
 }
 
 .button-title {
@@ -619,6 +603,66 @@ a,
   outline-offset: 2px;
 }
 
+.memory-control {
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  display: block;
+  background: color-mix(in srgb, var(--memory-accent) 10%, white);
+  border: 2px solid black;
+}
+
+.memory-title {
+  position: absolute;
+  left: 14px;
+  bottom: 10px;
+  z-index: 2;
+  pointer-events: none;
+  font-size: clamp(1rem, 2vw, 1.7rem);
+  font-weight: 600;
+  line-height: 1;
+  color: black;
+}
+
+.memory-slots {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(var(--memory-slot-count), minmax(0, 1fr));
+  gap: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.memory-slot {
+  appearance: none;
+  min-width: 0;
+  min-height: 0;
+  border: 0;
+  border-right: 1px solid black;
+  border-radius: 0;
+  background: color-mix(in srgb, var(--memory-accent) 18%, white);
+  opacity: 0.35;
+  padding: 0;
+  cursor: pointer;
+  transition: opacity 120ms ease, background-color 120ms ease;
+}
+
+.memory-slot:last-child {
+  border-right: 0;
+}
+
+.memory-slot.is-filled {
+  opacity: 1;
+  background: color-mix(in srgb, var(--memory-accent) 82%, white);
+}
+
+.memory-slot:focus-visible {
+  outline: 2px solid black;
+  outline-offset: 2px;
+}
+
 .sequencer-control {
   min-width: 0;
   min-height: 0;
@@ -630,13 +674,21 @@ a,
 
 .sequencer-surface {
   width: 100%;
-  height: 100%;
   min-width: 0;
   min-height: 0;
   display: grid;
   grid-template-columns: repeat(var(--sequencer-size), minmax(0, 1fr));
   gap: 0;
   align-items: stretch;
+}
+
+.sequencer-editor {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
 }
 
 .sequencer-step {
@@ -699,6 +751,58 @@ a,
   overflow: hidden;
   text-overflow: ellipsis;
   text-align: center;
+}
+
+.sequencer-param-row {
+  min-width: 0;
+  min-height: 34px;
+  display: grid;
+  grid-template-columns: repeat(var(--sequencer-size), minmax(0, 1fr));
+  border-top: 1px solid black;
+}
+
+.sequencer-param-cell {
+  appearance: none;
+  min-width: 0;
+  min-height: 34px;
+  position: relative;
+  border: 0;
+  border-right: 1px solid black;
+  border-radius: 0;
+  background: color-mix(in srgb, var(--sequencer-accent) 10%, white);
+  color: black;
+  overflow: hidden;
+  touch-action: none;
+  cursor: ns-resize;
+}
+
+.sequencer-param-cell:last-child {
+  border-right: 0;
+}
+
+.sequencer-param-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  background: color-mix(in srgb, var(--sequencer-accent) 62%, white);
+  opacity: 0.82;
+}
+
+.sequencer-param-value {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: black;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sequencer-chrome {

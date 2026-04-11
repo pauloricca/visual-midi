@@ -103,7 +103,7 @@ The layout fills the available UI area as a mosaic:
 
 Supported control fields:
 
-- `type`: optional, `slider`, `lfo`, `keyboard`, `button`, `tempo`, or `sequencer`, defaults to `slider`
+- `type`: optional, `slider`, `lfo`, `keyboard`, `button`, `tempo`, `sequencer`, or `memory`, defaults to `slider`
 - `name`
 - `color`: any CSS color string or a name from the root `palette`, optional when inherited from a parent container
 - `width`, `height`: optional `%` or `px` sizes for the control tile
@@ -129,12 +129,15 @@ Supported LFO fields:
 - uses the same `control`, `channel`, `min`, `max`, `steps`, `color`, `width`, `height`, and optional `osc` mapping as a slider
 - `complex`: optional boolean, defaults to `true`; set `false` to use the simpler single-surface LFO UI
 - `max_speed`: optional non-negative number, defaults to `12`; the speed control ranges from `0` to `max_speed`, and `0` stops all motion
+- `quantize_speed`: optional boolean, defaults to `false`; when `true`, the speed control snaps to tempo divisions from `4 bar` through `1/32`, including dotted intervals and a triplet interval, using the current transport BPM
+- `waveforms`: optional list of waveforms available to the LFO, defaults to `sine`, `triangle`, `square`, `saw`, `ramp`, `random`, and `s&h`
+- `shape_control`: optional `waveform` or `jitter`, defaults to `waveform`; in complex mode this chooses whether the bottom-right panel selects the waveform or controls jitter
 - if `default` is omitted, the control starts centered between `min` and `max`
 - the browser animates the output continuously around the center point
 - vertical drag or scroll changes depth, horizontal drag or scroll changes rate
-- depth/rate are remembered in browser storage per control key
-- in `complex: true` mode, the top-left panel sets the LFO midpoint and shows live movement, top-right controls depth, bottom-left controls speed, and bottom-right controls jitter
-- jitter blends between the sine LFO shape and a smoothed random motion, where `0` is pure LFO and `1` is pure jitter
+- depth, rate, waveform, and jitter are remembered in browser storage per control key
+- in `complex: true` mode, the top-left panel sets the LFO midpoint and shows live movement, top-right controls depth, bottom-left controls speed, and bottom-right controls waveform or jitter
+- jitter blends between the selected LFO waveform and a smoothed random motion, where `0` is pure LFO and `1` is pure jitter
 
 Supported keyboard fields:
 
@@ -179,17 +182,33 @@ Supported sequencer fields:
 - `channel`: MIDI channel from `1` to `16`
 - `min`, `max`: optional value range, defaults to `0..127`
 - `root`, `scale`: optional for `notes`; when both are present, step values are quantized to that scale and `root` becomes the default value when enabling a step
+- `velocity`/`vel`/`v`: optional boolean for `notes`; shows a per-step `v` row and sends that MIDI note velocity, default `false`
+- `gate`/`h`: optional boolean for `notes`; shows a per-step `h` row for note hold length in steps, default `false`
+- `max_gate_steps`: optional number `>= 1` for `notes`; maximum `h` value in steps, default `1`
 - `control`: optional for `cc`; required unless an `osc` route is present
 - `osc`: optional for `cc`; if present, the step value is mapped through `osc.min`/`osc.max` like a slider
 - sequencers require a tempo control somewhere in the same config
-- note sequencers send one note per active step and release the previous note on the next step or when transport stops
+- note sequencers send one note per active step and release it after its gate length or when transport stops
 - cc sequencers emit their step value on each active step and skip disabled steps
+
+Supported memory fields:
+
+- `type: memory`
+- `target`: required name of a control or named container subtree to snapshot and restore
+- `slots`: required number of memory slots, `>= 1`
+- `transition`: optional non-negative time in seconds to smooth recalled slider/LFO CC and OSC values, defaults to `0`
+- click an empty slot to save the current target state into it
+- click a filled slot to recall that saved state
+- press and hold a filled slot to clear it
+- memory snapshots persist in the same state file as sliders, tempo, and sequencers
+- if the target subtree contains the memory control itself, the memory control is ignored and does not snapshot its own slots
 
 Supported layout group fields:
 
 - `rows`
 - `columns`
 - `tabs`
+- `name`: optional unique name so a `memory.target` can point at the whole container subtree
 - `channel`, `default`, `min`, `max`, `steps`, `speed`, `orientation`, `color`: optional inherited defaults for descendant sliders and sequencers where relevant
 - `width`, `height`: optional `%` or `px` sizes for the container tile
 
@@ -214,6 +233,7 @@ Optional root fields:
 - Keyboard controls send `note_on` while a key is held and `note_off` on release, and support polyphonic multi-touch
 - Tempo controls persist their BPM in the same state file and drive the shared transport clock
 - Sequencer step state is persisted in the same state file alongside slider and tempo values
+- Memory slots persist snapshots of slider, tempo, and sequencer state for their configured target
 - OSC sends the current float slider position mapped into the configured `osc.min`/`osc.max` range
 - YAML edits are watched and trigger UI reload plus MIDI/OSC state resend
 - The frontend is served from separate static files under [src/visual_midi/web](/Users/pauloricca/Desktop/projects/visual-midi/src/visual_midi/web)
