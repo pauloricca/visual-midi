@@ -68,8 +68,8 @@ export async function postTransportState(playing) {
   });
 }
 
-export function sendKeyboardGate(channel, note, gate) {
-  void queueGateRequest(`keyboard:${channel}:${note}`, "/api/keyboard", { channel, note, gate });
+export function sendKeyboardGate(key, note, gate) {
+  void queueGateRequest(`keyboard:${key}:${note}`, "/api/keyboard", { key, note, gate });
 }
 
 export function sendButtonGate(key, gate) {

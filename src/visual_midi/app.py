@@ -67,12 +67,14 @@ class SizeSpec:
 
 @dataclass(frozen=True)
 class LayoutDefaults:
+    output: str = ""
     channel: int = 1
     default: int = 0
     minimum: int = 0
     maximum: int = 127
     steps: int | None = None
     speed: float = 1.0
+    quantize_speed_to_tempo_divisions: bool = False
     orientation: str = "vertical"
     color: str = "#d26a2e"
 
@@ -80,6 +82,7 @@ class LayoutDefaults:
 @dataclass(frozen=True)
 class SliderConfig:
     name: str
+    output: str
     channel: int
     control: int
     control_type: str = "slider"
@@ -107,6 +110,7 @@ class SliderConfig:
 @dataclass(frozen=True)
 class KeyboardConfig:
     name: str
+    output: str
     channel: int
     start: int = 60
     size: int = 12
@@ -116,10 +120,15 @@ class KeyboardConfig:
     width: SizeSpec | None = None
     height: SizeSpec | None = None
 
+    @property
+    def state_key(self) -> str:
+        return f"keyboard:{self.channel}:{self.start}:{self.size}:{self.name}"
+
 
 @dataclass(frozen=True)
 class ButtonConfig:
     name: str
+    output: str
     channel: int
     control: int
     color: str = "#d26a2e"
@@ -135,6 +144,7 @@ class ButtonConfig:
 @dataclass(frozen=True)
 class TempoConfig:
     name: str
+    output: str
     default: float = 120.0
     minimum: float = 20.0
     maximum: float = 300.0
@@ -150,6 +160,7 @@ class TempoConfig:
 @dataclass(frozen=True)
 class SequencerConfig:
     name: str
+    output: str
     mode: str
     size: int
     subdivision_label: str
@@ -425,17 +436,15 @@ def build_web_server(*, runtime: "RuntimeState") -> ThreadingHTTPServer:
             raw = self.rfile.read(content_length)
             try:
                 body = json.loads(raw.decode("utf-8"))
-                channel = validate_range(
-                    int(body["channel"]), 1, 16, "keyboard.channel", Path("request")
-                )
+                state_key = str(body["key"])
                 note = validate_range(int(body["note"]), 0, 127, "keyboard.note", Path("request"))
                 gate = bool(body["gate"])
-                runtime.send_keyboard_gate(channel=channel, note=note, gate=gate)
+                runtime.send_keyboard_gate(state_key=state_key, note=note, gate=gate)
             except (json.JSONDecodeError, KeyError, TypeError, ValueError, SystemExit) as exc:
                 self.send_error(HTTPStatus.BAD_REQUEST, str(exc))
                 return
 
-            payload = json.dumps({"channel": channel, "note": note, "gate": gate}).encode("utf-8")
+            payload = json.dumps({"key": state_key, "note": note, "gate": gate}).encode("utf-8")
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(payload)))
@@ -619,9 +628,7 @@ def load_config(config_path: Path) -> AppConfig:
         title = raw_title.strip() or None
     else:
         raise SystemExit(f"Config {config_path} title must be a string if provided")
-    output = raw.get("output")
-    if not isinstance(output, str) or not output.strip():
-        raise SystemExit(f"Config {config_path} must define a non-empty 'output'")
+    output = parse_output_name(raw.get("output"), config_path=config_path, path="output")
     inertia = parse_inertia(raw.get("inertia", 1.0), config_path=config_path, path="inertia")
     osc = parse_osc_output(raw.get("osc"), config_path=config_path)
 
@@ -707,7 +714,13 @@ def parse_root_layout(
         raw=raw,
         palette=palette,
         defaults=parse_layout_defaults(
-            raw, inherited=LayoutDefaults(), config_path=config_path, path="root", palette=palette
+            raw,
+            inherited=LayoutDefaults(
+                output=parse_output_name(raw.get("output"), config_path=config_path, path="output")
+            ),
+            config_path=config_path,
+            path="root",
+            palette=palette,
         ),
     )
 
@@ -966,38 +979,35 @@ def parse_slider(
         if control_type == "lfo" and "default" not in raw:
             default_value = int(round((minimum + maximum) / 2))
         slider = SliderConfig(
+            output=parse_output_name(
+                raw.get("output", defaults.output),
+                config_path=config_path,
+                path=f"{path}.output",
+            ),
             control_type=control_type,
             complex=parse_boolean(
-                raw.get("complex", True if control_type == "lfo" else False),
+                raw.get("complex", True),
                 config_path=config_path,
                 path=f"{path}.complex",
             ),
             max_speed=parse_nonnegative_speed(
                 raw.get("max_speed", 12.0), config_path=config_path, path=f"{path}.max_speed"
-            )
-            if control_type == "lfo"
-            else 12.0,
+            ),
             quantize_speed_to_tempo_divisions=parse_boolean(
-                raw.get("quantize_speed", False),
+                raw.get("quantize_speed", defaults.quantize_speed_to_tempo_divisions),
                 config_path=config_path,
                 path=f"{path}.quantize_speed",
-            )
-            if control_type == "lfo"
-            else False,
+            ),
             lfo_waveforms=parse_lfo_waveforms(
                 raw.get("waveforms", LFO_WAVEFORMS),
                 config_path=config_path,
                 path=f"{path}.waveforms",
-            )
-            if control_type == "lfo"
-            else LFO_WAVEFORMS,
+            ),
             lfo_shape_control=parse_lfo_shape_control(
                 raw.get("shape_control", "waveform"),
                 config_path=config_path,
                 path=f"{path}.shape_control",
-            )
-            if control_type == "lfo"
-            else "waveform",
+            ),
             name=str(raw["name"]),
             channel=validate_range(
                 int(raw.get("channel", defaults.channel)), 1, 16, f"{path}.channel", config_path
@@ -1049,6 +1059,11 @@ def parse_keyboard(
     try:
         keyboard = KeyboardConfig(
             name=str(raw["name"]),
+            output=parse_output_name(
+                raw.get("output", defaults.output),
+                config_path=config_path,
+                path=f"{path}.output",
+            ),
             channel=validate_range(
                 int(raw.get("channel", defaults.channel)), 1, 16, f"{path}.channel", config_path
             ),
@@ -1086,6 +1101,11 @@ def parse_button(
     try:
         return ButtonConfig(
             name=str(raw["name"]),
+            output=parse_output_name(
+                raw.get("output", defaults.output),
+                config_path=config_path,
+                path=f"{path}.output",
+            ),
             channel=validate_range(
                 int(raw.get("channel", defaults.channel)), 1, 16, f"{path}.channel", config_path
             ),
@@ -1116,6 +1136,11 @@ def parse_tempo(
     try:
         tempo = TempoConfig(
             name=str(raw["name"]),
+            output=parse_output_name(
+                raw.get("output", defaults.output),
+                config_path=config_path,
+                path=f"{path}.output",
+            ),
             default=parse_numeric_value(raw.get("default", 120.0), config_path=config_path, path=f"{path}.default"),
             minimum=parse_numeric_value(raw.get("min", 20.0), config_path=config_path, path=f"{path}.min"),
             maximum=parse_numeric_value(raw.get("max", 300.0), config_path=config_path, path=f"{path}.max"),
@@ -1151,6 +1176,11 @@ def parse_sequencer(
         mode = str(raw["mode"]).strip().lower()
         sequencer = SequencerConfig(
             name=str(raw["name"]),
+            output=parse_output_name(
+                raw.get("output", defaults.output),
+                config_path=config_path,
+                path=f"{path}.output",
+            ),
             mode=mode,
             size=parse_keyboard_size(raw["size"], config_path=config_path, path=f"{path}.size"),
             subdivision_label=normalize_subdivision_label(raw["subdivision"]),
@@ -1278,6 +1308,10 @@ def parse_layout_defaults(
     path: str,
     palette: dict[str, str],
 ) -> LayoutDefaults:
+    output = inherited.output
+    if "output" in raw:
+        output = parse_output_name(raw["output"], config_path=config_path, path=f"{path}.output")
+
     channel = inherited.channel
     if "channel" in raw:
         channel = validate_range(int(raw["channel"]), 1, 16, f"{path}.channel", config_path)
@@ -1302,6 +1336,12 @@ def parse_layout_defaults(
     if "speed" in raw:
         speed = parse_speed(raw["speed"], config_path=config_path, path=f"{path}.speed")
 
+    quantize_speed_to_tempo_divisions = inherited.quantize_speed_to_tempo_divisions
+    if "quantize_speed" in raw:
+        quantize_speed_to_tempo_divisions = parse_boolean(
+            raw["quantize_speed"], config_path=config_path, path=f"{path}.quantize_speed"
+        )
+
     orientation = inherited.orientation
     if "orientation" in raw:
         orientation = str(raw["orientation"])
@@ -1313,15 +1353,23 @@ def parse_layout_defaults(
         )
 
     return LayoutDefaults(
+        output=output,
         channel=channel,
         default=default,
         minimum=minimum,
         maximum=maximum,
         steps=steps,
         speed=speed,
+        quantize_speed_to_tempo_divisions=quantize_speed_to_tempo_divisions,
         orientation=orientation,
         color=color,
     )
+
+
+def parse_output_name(raw: Any, *, config_path: Path, path: str) -> str:
+    if not isinstance(raw, str) or not raw.strip():
+        raise SystemExit(f"Config {config_path} must define a non-empty '{path}'")
+    return raw.strip()
 
 
 def parse_osc_route(raw: Any, *, config_path: Path, path: str) -> OscRouteConfig | None:
@@ -1581,6 +1629,25 @@ def collect_buttons_by_key(node: LayoutNode) -> dict[str, ButtonConfig]:
     return buttons
 
 
+def find_keyboard_by_key(node: LayoutNode, state_key: str) -> KeyboardConfig | None:
+    if isinstance(node, KeyboardConfig):
+        return node if node.state_key == state_key else None
+    if isinstance(node, (SliderConfig, ButtonConfig, TempoConfig, SequencerConfig, MemoryConfig)):
+        return None
+    if isinstance(node, TabsConfig):
+        for tab in node.tabs:
+            found = find_keyboard_by_key(tab.content, state_key)
+            if found is not None:
+                return found
+        return None
+
+    for child in node.children:
+        found = find_keyboard_by_key(child, state_key)
+        if found is not None:
+            return found
+    return None
+
+
 def collect_tempo(node: LayoutNode) -> TempoConfig | None:
     if isinstance(node, TempoConfig):
         return node
@@ -1640,6 +1707,26 @@ def collect_memories(node: LayoutNode) -> list[MemoryConfig]:
     for child in node.children:
         memories.extend(collect_memories(child))
     return memories
+
+
+def collect_midi_output_names(config: AppConfig) -> set[str]:
+    names = {config.output}
+    collect_layout_midi_output_names(config.layout, names)
+    return names
+
+
+def collect_layout_midi_output_names(node: LayoutNode, names: set[str]) -> None:
+    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, TempoConfig, SequencerConfig)):
+        names.add(node.output)
+        return
+    if isinstance(node, MemoryConfig):
+        return
+    if isinstance(node, TabsConfig):
+        for tab in node.tabs:
+            collect_layout_midi_output_names(tab.content, names)
+        return
+    for child in node.children:
+        collect_layout_midi_output_names(child, names)
 
 
 def count_controls(node: LayoutNode) -> int:
@@ -1994,21 +2081,21 @@ class RuntimeState:
         self._last_reload_error: str | None = None
 
         config = load_config(config_path)
-        midi_out = self._open_midi_output(config.output)
+        midi_outputs = self._open_midi_outputs(collect_midi_output_names(config))
         try:
             osc_client = self._open_osc_output(config.osc)
         except SystemExit:
-            midi_out.close()
+            close_midi_outputs(midi_outputs)
             raise
         self._config = config
-        self._midi_out = midi_out
+        self._midi_outputs = midi_outputs
         self._osc_client = osc_client
         raw_state = load_raw_state(state_path)
         self._state = load_numeric_state(raw_state)
         self._sequencer_state = load_sequencer_state(raw_state)
         self._memory_state = load_memory_state(raw_state)
         self._last_midi_values: dict[str, int] = {}
-        self._active_notes: dict[tuple[int, int], int] = {}
+        self._active_notes: dict[tuple[str, int, int], int] = {}
         self._active_buttons: dict[str, int] = {}
         self._sliders_by_key = {slider.state_key: slider for slider in config.sliders}
         self._buttons_by_key = collect_buttons_by_key(config.layout)
@@ -2028,7 +2115,7 @@ class RuntimeState:
                 self._state.get(self._tempo.state_key, self._tempo.default),
             )
         self._transport = MidiTempoClock(
-            midi_out=self._midi_out,
+            midi_out=self._midi_outputs[self._transport_output_name(config)],
             bpm=self._tempo_bpm,
             on_tick=self._handle_transport_tick,
         )
@@ -2043,7 +2130,7 @@ class RuntimeState:
             self._silence_active_notes_locked()
         self._transport.close()
         with self.lock:
-            self._midi_out.close()
+            close_midi_outputs(self._midi_outputs)
 
     def current_config(self) -> AppConfig:
         self.reload_if_needed()
@@ -2110,10 +2197,15 @@ class RuntimeState:
                     slider, self._state.get(slider.state_key, float(slider.default)), force_midi=True
                 )
 
-    def send_keyboard_gate(self, *, channel: int, note: int, gate: bool) -> None:
+    def send_keyboard_gate(self, *, state_key: str, note: int, gate: bool) -> None:
         self.reload_if_needed()
         with self.lock:
-            self._send_note_gate_locked(channel=channel, note=note, gate=gate)
+            keyboard = find_keyboard_by_key(self._config.layout, state_key)
+            if keyboard is None:
+                raise ValueError(f"Unknown keyboard key: {state_key}")
+            self._send_note_gate_locked(
+                output=keyboard.output, channel=keyboard.channel, note=note, gate=gate
+            )
 
     def send_button_gate(self, *, state_key: str, gate: bool) -> None:
         self.reload_if_needed()
@@ -2205,13 +2297,15 @@ class RuntimeState:
             print(f"Config reload failed: {exc}")
             return False
 
-        new_midi_out = None
+        new_midi_outputs = None
         new_osc_client = None
         should_stop_transport = False
         with self.lock:
-            if new_config.output != self._config.output:
+            new_output_names = collect_midi_output_names(new_config)
+            current_output_names = set(self._midi_outputs)
+            if new_output_names != current_output_names:
                 try:
-                    new_midi_out = self._open_midi_output(new_config.output)
+                    new_midi_outputs = self._open_midi_outputs(new_output_names)
                 except SystemExit as exc:
                     self._last_reload_error = str(exc)
                     print(f"Config reload failed: {exc}")
@@ -2221,23 +2315,23 @@ class RuntimeState:
                 try:
                     new_osc_client = self._open_osc_output(new_config.osc)
                 except SystemExit as exc:
-                    if new_midi_out is not None:
-                        new_midi_out.close()
+                    if new_midi_outputs is not None:
+                        close_midi_outputs(new_midi_outputs)
                     self._last_reload_error = str(exc)
                     print(f"Config reload failed: {exc}")
                     return False
 
-            old_midi_out = self._midi_out
+            old_midi_outputs = self._midi_outputs
             self._silence_active_buttons_locked()
             self._silence_active_sequencer_notes_locked()
             self._silence_active_notes_locked()
-            if new_midi_out is not None:
-                self._midi_out = new_midi_out
-                self._transport.set_output(new_midi_out)
+            if new_midi_outputs is not None:
+                self._midi_outputs = new_midi_outputs
+            self._transport.set_output(self._midi_outputs[self._transport_output_name(new_config)])
             if new_osc_client is not None or new_config.osc is None:
                 self._osc_client = new_osc_client
             self._config = new_config
-            if new_midi_out is not None:
+            if new_midi_outputs is not None:
                 self._last_midi_values = {}
             self._sliders_by_key = {slider.state_key: slider for slider in new_config.sliders}
             self._buttons_by_key = collect_buttons_by_key(new_config.layout)
@@ -2274,8 +2368,8 @@ class RuntimeState:
                     force_midi=True,
                 )
 
-        if new_midi_out is not None:
-            old_midi_out.close()
+        if new_midi_outputs is not None:
+            close_midi_outputs(old_midi_outputs)
         if should_stop_transport:
             self._transport.stop()
             self._handle_transport_stop()
@@ -2310,6 +2404,7 @@ class RuntimeState:
         if isinstance(node, KeyboardConfig):
             return {
                 "type": "keyboard",
+                "key": node.state_key,
                 "name": node.name,
                 "channel": node.channel,
                 "start": node.start,
@@ -2657,10 +2752,32 @@ class RuntimeState:
                 f"Could not open MIDI output '{output_name}'. Available outputs: {available}"
             ) from exc
 
+    def _open_midi_outputs(self, output_names: set[str]) -> dict[str, mido.ports.BaseOutput]:
+        opened: dict[str, mido.ports.BaseOutput] = {}
+        try:
+            for output_name in sorted(output_names):
+                opened[output_name] = self._open_midi_output(output_name)
+        except SystemExit:
+            close_midi_outputs(opened)
+            raise
+        return opened
+
+    def _midi_output(self, output_name: str) -> mido.ports.BaseOutput:
+        try:
+            return self._midi_outputs[output_name]
+        except KeyError as exc:
+            raise ValueError(f"Unknown MIDI output: {output_name}") from exc
+
+    def _transport_output_name(self, config: AppConfig) -> str:
+        if config.tempo is not None:
+            return config.tempo.output
+        return config.output
+
     def _send_midi_value(self, slider: SliderConfig, value: float, *, force: bool = False) -> None:
         midi_value = clamp_numeric_value(round(value), minimum=0, maximum=127)
         midi_value = int(midi_value)
-        previous_value = self._last_midi_values.get(slider.state_key)
+        midi_key = f"{slider.output}:{slider.state_key}"
+        previous_value = self._last_midi_values.get(midi_key)
         if not force and previous_value == midi_value:
             return
         message = mido.Message(
@@ -2669,18 +2786,18 @@ class RuntimeState:
             control=slider.control,
             value=midi_value,
         )
-        self._midi_out.send(message)
-        self._last_midi_values[slider.state_key] = midi_value
+        self._midi_output(slider.output).send(message)
+        self._last_midi_values[midi_key] = midi_value
 
-    def _send_note_gate_locked(self, *, channel: int, note: int, gate: bool) -> None:
-        note_key = (channel, note)
+    def _send_note_gate_locked(self, *, output: str, channel: int, note: int, gate: bool) -> None:
+        note_key = (output, channel, note)
         count = self._active_notes.get(note_key, 0)
         if gate:
             self._active_notes[note_key] = count + 1
             if count > 0:
                 return
             message = mido.Message("note_on", channel=channel - 1, note=note, velocity=127)
-            self._midi_out.send(message)
+            self._midi_output(output).send(message)
             return
 
         if count <= 0:
@@ -2688,12 +2805,12 @@ class RuntimeState:
         if count == 1:
             self._active_notes.pop(note_key, None)
             message = mido.Message("note_off", channel=channel - 1, note=note, velocity=0)
-            self._midi_out.send(message)
+            self._midi_output(output).send(message)
             return
         self._active_notes[note_key] = count - 1
 
-    def _send_note_on_locked(self, *, channel: int, note: int, velocity: int) -> None:
-        note_key = (channel, note)
+    def _send_note_on_locked(self, *, output: str, channel: int, note: int, velocity: int) -> None:
+        note_key = (output, channel, note)
         count = self._active_notes.get(note_key, 0)
         self._active_notes[note_key] = count + 1
         if count > 0:
@@ -2704,12 +2821,12 @@ class RuntimeState:
             note=note,
             velocity=validate_range(velocity, 0, 127, "velocity", self.config_path),
         )
-        self._midi_out.send(message)
+        self._midi_output(output).send(message)
 
     def _silence_active_notes_locked(self) -> None:
-        for (channel, note), _count in list(self._active_notes.items()):
+        for (output, channel, note), _count in list(self._active_notes.items()):
             message = mido.Message("note_off", channel=channel - 1, note=note, velocity=0)
-            self._midi_out.send(message)
+            self._midi_output(output).send(message)
         self._active_notes.clear()
 
     def _advance_sequencer_locked(self, sequencer: SequencerConfig) -> None:
@@ -2742,11 +2859,15 @@ class RuntimeState:
     ) -> None:
         current = self._active_sequencer_notes.get(sequencer.state_key)
         if current is not None:
-            self._send_note_gate_locked(channel=sequencer.channel, note=current.note, gate=False)
+            self._send_note_gate_locked(
+                output=sequencer.output, channel=sequencer.channel, note=current.note, gate=False
+            )
             self._active_sequencer_notes.pop(sequencer.state_key, None)
         if note is None:
             return
-        self._send_note_on_locked(channel=sequencer.channel, note=note, velocity=velocity)
+        self._send_note_on_locked(
+            output=sequencer.output, channel=sequencer.channel, note=note, velocity=velocity
+        )
         self._active_sequencer_notes[sequencer.state_key] = ActiveSequencerNote(
             note=note,
             remaining_ticks=max(1, gate_ticks),
@@ -2761,7 +2882,9 @@ class RuntimeState:
             active.remaining_ticks -= 1
             if active.remaining_ticks > 0:
                 continue
-            self._send_note_gate_locked(channel=sequencer.channel, note=active.note, gate=False)
+            self._send_note_gate_locked(
+                output=sequencer.output, channel=sequencer.channel, note=active.note, gate=False
+            )
             self._active_sequencer_notes.pop(state_key, None)
 
     def _silence_active_sequencer_notes_locked(self) -> None:
@@ -2769,7 +2892,9 @@ class RuntimeState:
             sequencer = self._sequencers_by_key.get(state_key)
             if sequencer is None:
                 continue
-            self._send_note_gate_locked(channel=sequencer.channel, note=active.note, gate=False)
+            self._send_note_gate_locked(
+                output=sequencer.output, channel=sequencer.channel, note=active.note, gate=False
+            )
         self._active_sequencer_notes.clear()
 
     def _silence_active_buttons_locked(self) -> None:
@@ -2807,7 +2932,7 @@ class RuntimeState:
             control=button.control,
             value=value,
         )
-        self._midi_out.send(message)
+        self._midi_output(button.output).send(message)
 
     def _send_sequencer_cc_locked(self, sequencer: SequencerConfig, value: int) -> None:
         if sequencer.control is None:
@@ -2818,7 +2943,7 @@ class RuntimeState:
             control=sequencer.control,
             value=value,
         )
-        self._midi_out.send(message)
+        self._midi_output(sequencer.output).send(message)
 
     def _send_button_osc_locked(self, button: ButtonConfig, value: int) -> None:
         if button.osc is None or self._osc_client is None:
@@ -2875,6 +3000,11 @@ def serialize_size(size: SizeSpec | None) -> str | None:
     if size.value.is_integer():
         return f"{int(size.value)}%"
     return f"{size.value}%"
+
+
+def close_midi_outputs(outputs: dict[str, mido.ports.BaseOutput]) -> None:
+    for midi_out in outputs.values():
+        midi_out.close()
 
 
 def serialize_osc_route(route: OscRouteConfig | None) -> dict[str, Any] | None:

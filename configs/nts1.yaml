@@ -1,12 +1,8 @@
-# KORG Nu:Tekt NTS-1 digital kit mk1 controller template.
-#
-# Covers all 29 MIDI CC parameters from the mk1 MIDI implementation chart.
-# On the NTS-1, set the global MIDI channel to match `channel` below and set
-# MIDI RX ShortMessage to ON. For tempo clock, set MIDI Clock src to Auto.
-title: KORG NTS-1 mk1
-# output: NTS-1 digital kit
-output: IAC Driver Bus 1
+title: KORG NTS-1
+output: NTS-1 digital kit SOUND
+# output: IAC Driver Bus 1
 inertia: 1.2
+quantize_speed: true
 palette:
   osc: "#d85a3a"
   filter: "#2f7f68"
@@ -39,19 +35,13 @@ rows:
                       default: 0
                       color: osc
                 - columns:
-                    - type: lfo
-                      name: Osc LFO Rate
+                    - name: Osc LFO Rate
                       control: 24
                       default: 0
-                      complex: false
-                      max_speed: 4
                       color: motion
-                    - type: lfo
-                      name: Osc LFO Depth
+                    - name: Osc LFO Depth
                       control: 26
                       default: 0
-                      complex: false
-                      max_speed: 4
                       color: motion
           - tab:
               name: Filter
@@ -71,21 +61,13 @@ rows:
                       default: 0
                       color: filter
                 - columns:
-                    - type: lfo
-                      name: Sweep Depth
+                    - name: Sweep Depth
                       control: 45
                       default: 63
-                      min: 0
-                      max: 127
-                      complex: true
-                      max_speed: 3
                       color: motion
-                    - type: lfo
-                      name: Sweep Rate
+                    - name: Sweep Rate
                       control: 46
                       default: 0
-                      complex: false
-                      max_speed: 3
                       color: motion
       - tabs:
           - tab:
@@ -109,19 +91,13 @@ rows:
               name: Tremolo
               rows:
                 - columns:
-                    - type: lfo
-                      name: Tremolo Depth
+                    - name: Tremolo Depth
                       control: 20
                       default: 0
-                      complex: false
-                      max_speed: 4
                       color: motion
-                    - type: lfo
-                      name: Tremolo Rate
+                    - name: Tremolo Rate
                       control: 21
                       default: 0
-                      complex: false
-                      max_speed: 4
                       color: motion
           - tab:
               name: Arp

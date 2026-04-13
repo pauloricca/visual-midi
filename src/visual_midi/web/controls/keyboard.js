@@ -75,7 +75,7 @@ export function renderKeyboard(node) {
     activePointers.set(pointerId, note);
     incrementNote(note);
     updateKeyVisual(note, true);
-    sendKeyboardGate(node.channel, note, true);
+    sendKeyboardGate(node.key, note, true);
   };
 
   const releasePointer = (pointerId) => {
@@ -86,7 +86,7 @@ export function renderKeyboard(node) {
     activePointers.delete(pointerId);
     decrementNote(note);
     updateKeyVisual(note, activeNotes.has(note));
-    sendKeyboardGate(node.channel, note, false);
+    sendKeyboardGate(node.key, note, false);
   };
 
   if (scaleMode) {

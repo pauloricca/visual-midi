@@ -19,6 +19,7 @@ palette:
 #   sand: "black"
 #   plum: "black"
 #   teal: "black"
+quantize_speed: true
 rows:
   - columns:
     - rows:
@@ -38,23 +39,12 @@ rows:
           channel: 1
           control: 11
           color: orange
-          quantize_speed: true
-          min: 50
-          max: 127
-          osc:
-            path: /visual/freq/b
-            min: 20
-            max: 20000
     - rows:
         - name: Fold bias
           channel: 1
           control: 21
           default: 64
           color: slate
-          osc:
-            path: /visual/freq/c
-            min: 20
-            max: 20000
     - tabs:
         - tab:
             name: Buttons

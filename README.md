@@ -103,7 +103,7 @@ The layout fills the available UI area as a mosaic:
 
 Supported control fields:
 
-- `type`: optional, `slider`, `lfo`, `keyboard`, `button`, `tempo`, `sequencer`, or `memory`, defaults to `slider`
+- `type`: optional, `slider`, `lfo`, `keyboard`, `button`, `tempo`, `sequencer`, or `memory`, defaults to `slider`; `lfo` is kept as a compatibility alias for a slider that opens in the LFO controls
 - `name`
 - `color`: any CSS color string or a name from the root `palette`, optional when inherited from a parent container
 - `width`, `height`: optional `%` or `px` sizes for the control tile
@@ -122,19 +122,16 @@ Supported slider fields:
 - `osc`: optional per-slider OSC mapping
 - `osc.path`: OSC address to send when the slider changes
 - `osc.min`, `osc.max`: output range for the OSC value after mapping from the slider's `min`/`max`
-
-Supported LFO fields:
-
-- `type: lfo`
-- uses the same `control`, `channel`, `min`, `max`, `steps`, `color`, `width`, `height`, and optional `osc` mapping as a slider
 - `complex`: optional boolean, defaults to `true`; set `false` to use the simpler single-surface LFO UI
 - `max_speed`: optional non-negative number, defaults to `12`; the speed control ranges from `0` to `max_speed`, and `0` stops all motion
-- `quantize_speed`: optional boolean, defaults to `false`; when `true`, the speed control snaps to tempo divisions from `4 bar` through `1/32`, including dotted intervals and a triplet interval, using the current transport BPM
+- `quantize_speed`: optional boolean, defaults to `false`; when `true`, the speed control snaps to tempo divisions from `16 bar` through `1/32`, including dotted intervals and a triplet interval, using the current transport BPM
 - `waveforms`: optional list of waveforms available to the LFO, defaults to `sine`, `triangle`, `square`, `saw`, `ramp`, `random`, and `s&h`
 - `shape_control`: optional `waveform` or `jitter`, defaults to `waveform`; in complex mode this chooses whether the bottom-right panel selects the waveform or controls jitter
-- if `default` is omitted, the control starts centered between `min` and `max`
-- the browser animates the output continuously around the center point
-- vertical drag or scroll changes depth, horizontal drag or scroll changes rate
+- double tap/click toggles between the slider surface and the LFO controls
+- sliders start with depth `0` and speed `0`, so they do not animate until LFO depth and speed are raised
+- `type: lfo` controls open in the LFO controls and, if `default` is omitted, start centered between `min` and `max`
+- when the LFO controls are hidden, drag or scroll changes the LFO center point; any active LFO motion continues
+- in the simple LFO UI, vertical drag or scroll changes depth, horizontal drag or scroll changes rate
 - depth, rate, waveform, and jitter are remembered in browser storage per control key
 - in `complex: true` mode, the top-left panel sets the LFO midpoint and shows live movement, top-right controls depth, bottom-left controls speed, and bottom-right controls waveform or jitter
 - jitter blends between the selected LFO waveform and a smoothed random motion, where `0` is pure LFO and `1` is pure jitter

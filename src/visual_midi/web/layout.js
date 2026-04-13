@@ -3,13 +3,12 @@ import { renderKeyboard } from "./controls/keyboard.js";
 import { renderLfo } from "./controls/lfo.js";
 import { renderMemory } from "./controls/memory.js";
 import { renderSequencer } from "./controls/sequencer.js";
-import { renderSlider } from "./controls/slider.js";
 import { renderTempo } from "./controls/tempo.js";
 import { applyGroupTracks, applyNodeSizing } from "./utils/layout.js";
 
 export function renderLayoutWithConfig(node, payload) {
   if (node.type === "slider") {
-    return renderSlider({ ...node, inertia: payload.inertia });
+    return renderLfo({ ...node, inertia: payload.inertia });
   }
   if (node.type === "lfo") {
     return renderLfo(node);

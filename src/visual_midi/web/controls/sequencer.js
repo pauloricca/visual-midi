@@ -90,6 +90,9 @@ export function renderSequencer(node) {
     };
 
     button.addEventListener("pointerdown", (event) => {
+      if (!isPrimaryPointerButton(event)) {
+        return;
+      }
       event.preventDefault();
       drag.active = true;
       drag.pointerId = event.pointerId;
@@ -437,6 +440,10 @@ function renderSequencerParamRow({
   });
 
   parent.appendChild(row);
+}
+
+function isPrimaryPointerButton(event) {
+  return event.pointerType === "touch" || event.button === 0;
 }
 
 function updateParamElement(element, rawValue, ratioForValue, label) {
