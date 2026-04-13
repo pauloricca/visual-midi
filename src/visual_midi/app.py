@@ -77,6 +77,7 @@ class LayoutDefaults:
     quantize_speed_to_tempo_divisions: bool = False
     orientation: str = "vertical"
     color: str = "#d26a2e"
+    show_label: bool = True
 
 
 @dataclass(frozen=True)
@@ -98,6 +99,7 @@ class SliderConfig:
     speed: float = 1.0
     orientation: str = "vertical"
     color: str = "#d26a2e"
+    show_label: bool = True
     width: SizeSpec | None = None
     height: SizeSpec | None = None
     osc: "OscRouteConfig | None" = None
@@ -117,6 +119,7 @@ class KeyboardConfig:
     scale: str | None = None
     root: int | None = None
     color: str = "#d26a2e"
+    show_label: bool = True
     width: SizeSpec | None = None
     height: SizeSpec | None = None
 
@@ -132,6 +135,7 @@ class ButtonConfig:
     channel: int
     control: int
     color: str = "#d26a2e"
+    show_label: bool = True
     width: SizeSpec | None = None
     height: SizeSpec | None = None
     osc: "OscRouteConfig | None" = None
@@ -149,6 +153,7 @@ class TempoConfig:
     minimum: float = 20.0
     maximum: float = 300.0
     color: str = "#d26a2e"
+    show_label: bool = True
     width: SizeSpec | None = None
     height: SizeSpec | None = None
 
@@ -173,8 +178,13 @@ class SequencerConfig:
     scale: str | None = None
     velocity_row: bool = False
     gate_row: bool = False
+    timing_row: bool = False
+    default_velocity: int = 127
+    default_gate: float = 1.0
+    default_timing: float = 0.0
     max_gate_steps: float = 1.0
     color: str = "#d26a2e"
+    show_label: bool = True
     width: SizeSpec | None = None
     height: SizeSpec | None = None
     osc: "OscRouteConfig | None" = None
@@ -218,6 +228,7 @@ class MemoryConfig:
     slots: int
     transition: float = 0.0
     color: str = "#d26a2e"
+    show_label: bool = True
     width: SizeSpec | None = None
     height: SizeSpec | None = None
 
@@ -265,11 +276,22 @@ class SequencerStepState:
     value: int
     velocity: int = 127
     gate: float = 1.0
+    timing: float = 0.0
 
 
 @dataclass
 class ActiveSequencerNote:
+    state_key: str
     note: int
+    remaining_ticks: int
+
+
+@dataclass
+class ScheduledSequencerNote:
+    state_key: str
+    note: int
+    velocity: int
+    gate_ticks: int
     remaining_ticks: int
 
 
@@ -1031,6 +1053,11 @@ def parse_slider(
                 config_path=config_path,
                 path=f"{path}.color",
             ),
+            show_label=parse_boolean(
+                raw.get("show_label", defaults.show_label),
+                config_path=config_path,
+                path=f"{path}.show_label",
+            ),
             width=parse_size(raw.get("width"), config_path=config_path, path=f"{path}.width"),
             height=parse_size(raw.get("height"), config_path=config_path, path=f"{path}.height"),
             osc=parse_osc_route(raw.get("osc"), config_path=config_path, path=f"{path}.osc"),
@@ -1077,6 +1104,11 @@ def parse_keyboard(
                 config_path=config_path,
                 path=f"{path}.color",
             ),
+            show_label=parse_boolean(
+                raw.get("show_label", defaults.show_label),
+                config_path=config_path,
+                path=f"{path}.show_label",
+            ),
             width=parse_size(raw.get("width"), config_path=config_path, path=f"{path}.width"),
             height=parse_size(raw.get("height"), config_path=config_path, path=f"{path}.height"),
         )
@@ -1116,6 +1148,11 @@ def parse_button(
                 config_path=config_path,
                 path=f"{path}.color",
             ),
+            show_label=parse_boolean(
+                raw.get("show_label", defaults.show_label),
+                config_path=config_path,
+                path=f"{path}.show_label",
+            ),
             width=parse_size(raw.get("width"), config_path=config_path, path=f"{path}.width"),
             height=parse_size(raw.get("height"), config_path=config_path, path=f"{path}.height"),
             osc=parse_osc_route(raw.get("osc"), config_path=config_path, path=f"{path}.osc"),
@@ -1150,6 +1187,11 @@ def parse_tempo(
                 config_path=config_path,
                 path=f"{path}.color",
             ),
+            show_label=parse_boolean(
+                raw.get("show_label", defaults.show_label),
+                config_path=config_path,
+                path=f"{path}.show_label",
+            ),
             width=parse_size(raw.get("width"), config_path=config_path, path=f"{path}.width"),
             height=parse_size(raw.get("height"), config_path=config_path, path=f"{path}.height"),
         )
@@ -1174,6 +1216,13 @@ def parse_sequencer(
 ) -> SequencerConfig:
     try:
         mode = str(raw["mode"]).strip().lower()
+        max_gate_steps = parse_positive_numeric_alias(
+            raw,
+            keys=("max_gate_steps", "max_gate", "gate_max"),
+            default=1.0,
+            config_path=config_path,
+            path=path,
+        )
         sequencer = SequencerConfig(
             name=str(raw["name"]),
             output=parse_output_name(
@@ -1203,30 +1252,57 @@ def parse_sequencer(
             scale=parse_scale_name(raw.get("scale"), config_path=config_path, path=f"{path}.scale"),
             velocity_row=parse_optional_boolean_alias(
                 raw,
-                keys=("velocity", "vel", "v"),
+                keys=("velocity_row", "show_velocity"),
                 default=False,
                 config_path=config_path,
                 path=path,
             ),
             gate_row=parse_optional_boolean_alias(
                 raw,
-                keys=("gate", "h"),
+                keys=("gate_row", "show_gate"),
                 default=False,
                 config_path=config_path,
                 path=path,
             ),
-            max_gate_steps=parse_positive_numeric_alias(
+            timing_row=parse_optional_boolean_alias(
                 raw,
-                keys=("max_gate_steps", "max_gate", "gate_max"),
+                keys=("timing_row", "show_timing"),
+                default=False,
+                config_path=config_path,
+                path=path,
+            ),
+            default_velocity=parse_optional_velocity_alias(
+                raw,
+                keys=("velocity",),
+                default=127,
+                config_path=config_path,
+                path=path,
+            ),
+            default_gate=parse_positive_numeric_alias(
+                raw,
+                keys=("gate",),
                 default=1.0,
                 config_path=config_path,
                 path=path,
             ),
+            default_timing=parse_optional_timing_alias(
+                raw,
+                keys=("timing",),
+                default=0.0,
+                config_path=config_path,
+                path=path,
+            ),
+            max_gate_steps=max_gate_steps,
             color=resolve_color(
                 raw.get("color", defaults.color),
                 palette=palette,
                 config_path=config_path,
                 path=f"{path}.color",
+            ),
+            show_label=parse_boolean(
+                raw.get("show_label", defaults.show_label),
+                config_path=config_path,
+                path=f"{path}.show_label",
             ),
             width=parse_size(raw.get("width"), config_path=config_path, path=f"{path}.width"),
             height=parse_size(raw.get("height"), config_path=config_path, path=f"{path}.height"),
@@ -1246,6 +1322,8 @@ def parse_sequencer(
         raise SystemExit(f"{config_path} {path} must define scale when root is set")
     if sequencer.max_gate_steps < 1:
         raise SystemExit(f"{config_path} {path}.max_gate_steps must be at least 1")
+    if sequencer.default_gate > sequencer.max_gate_steps:
+        raise SystemExit(f"{config_path} {path}.gate must be no greater than max_gate_steps")
     if sequencer.mode == "notes":
         if sequencer.control is not None:
             raise SystemExit(f"{config_path} {path}.control is only valid for cc sequencers")
@@ -1253,9 +1331,17 @@ def parse_sequencer(
             raise SystemExit(f"{config_path} {path}.osc is only valid for cc sequencers")
     else:
         if sequencer.velocity_row:
-            raise SystemExit(f"{config_path} {path}.velocity is only valid for note sequencers")
+            raise SystemExit(f"{config_path} {path}.velocity_row is only valid for note sequencers")
         if sequencer.gate_row:
+            raise SystemExit(f"{config_path} {path}.gate_row is only valid for note sequencers")
+        if sequencer.timing_row:
+            raise SystemExit(f"{config_path} {path}.timing_row is only valid for note sequencers")
+        if sequencer.default_velocity != 127:
+            raise SystemExit(f"{config_path} {path}.velocity is only valid for note sequencers")
+        if sequencer.default_gate != 1.0:
             raise SystemExit(f"{config_path} {path}.gate is only valid for note sequencers")
+        if sequencer.default_timing != 0.0:
+            raise SystemExit(f"{config_path} {path}.timing is only valid for note sequencers")
         if sequencer.max_gate_steps != 1.0:
             raise SystemExit(f"{config_path} {path}.max_gate_steps is only valid for note sequencers")
         if sequencer.control is None and sequencer.osc is None:
@@ -1291,6 +1377,11 @@ def parse_memory(
                 palette=palette,
                 config_path=config_path,
                 path=f"{path}.color",
+            ),
+            show_label=parse_boolean(
+                raw.get("show_label", defaults.show_label),
+                config_path=config_path,
+                path=f"{path}.show_label",
             ),
             width=parse_size(raw.get("width"), config_path=config_path, path=f"{path}.width"),
             height=parse_size(raw.get("height"), config_path=config_path, path=f"{path}.height"),
@@ -1352,6 +1443,12 @@ def parse_layout_defaults(
             raw["color"], palette=palette, config_path=config_path, path=f"{path}.color"
         )
 
+    show_label = inherited.show_label
+    if "show_label" in raw:
+        show_label = parse_boolean(
+            raw["show_label"], config_path=config_path, path=f"{path}.show_label"
+        )
+
     return LayoutDefaults(
         output=output,
         channel=channel,
@@ -1363,6 +1460,7 @@ def parse_layout_defaults(
         quantize_speed_to_tempo_divisions=quantize_speed_to_tempo_divisions,
         orientation=orientation,
         color=color,
+        show_label=show_label,
     )
 
 
@@ -1844,10 +1942,48 @@ def parse_positive_numeric_alias(
     for key in keys:
         if key not in raw:
             continue
+        if isinstance(raw[key], bool):
+            raise SystemExit(f"{config_path} {path}.{key} must be a number")
         value = parse_numeric_value(raw[key], config_path=config_path, path=f"{path}.{key}")
         if value <= 0:
             raise SystemExit(f"{config_path} {path}.{key} must be greater than 0")
         return value
+    return default
+
+
+def parse_optional_velocity_alias(
+    raw: dict[str, Any],
+    *,
+    keys: tuple[str, ...],
+    default: int,
+    config_path: Path,
+    path: str,
+) -> int:
+    for key in keys:
+        if key not in raw:
+            continue
+        if isinstance(raw[key], bool):
+            raise SystemExit(f"{config_path} {path}.{key} must be a number")
+        value = parse_numeric_value(raw[key], config_path=config_path, path=f"{path}.{key}")
+        return validate_range(int(round(value)), 1, 127, f"{path}.{key}", config_path)
+    return default
+
+
+def parse_optional_timing_alias(
+    raw: dict[str, Any],
+    *,
+    keys: tuple[str, ...],
+    default: float,
+    config_path: Path,
+    path: str,
+) -> float:
+    for key in keys:
+        if key not in raw:
+            continue
+        if isinstance(raw[key], bool):
+            raise SystemExit(f"{config_path} {path}.{key} must be a number")
+        value = parse_numeric_value(raw[key], config_path=config_path, path=f"{path}.{key}")
+        return round(clamp_numeric_value(value, minimum=-1.0, maximum=1.0) * 100.0) / 100.0
     return default
 
 
@@ -1893,10 +2029,14 @@ def load_sequencer_state(raw_state: dict[str, Any]) -> dict[str, list[SequencerS
                 break
             raw_velocity = item.get("velocity", 127)
             raw_gate = item.get("gate", 1.0)
+            raw_timing = item.get("timing", 0.0)
             if isinstance(raw_velocity, bool) or not isinstance(raw_velocity, (int, float)):
                 valid = False
                 break
             if isinstance(raw_gate, bool) or not isinstance(raw_gate, (int, float)):
+                valid = False
+                break
+            if isinstance(raw_timing, bool) or not isinstance(raw_timing, (int, float)):
                 valid = False
                 break
             steps.append(
@@ -1905,6 +2045,7 @@ def load_sequencer_state(raw_state: dict[str, Any]) -> dict[str, list[SequencerS
                     value=int(raw_value),
                     velocity=int(raw_velocity),
                     gate=float(raw_gate),
+                    timing=float(raw_timing),
                 )
             )
         if valid:
@@ -1960,10 +2101,14 @@ def load_memory_state(raw_state: dict[str, Any]) -> dict[str, list[MemorySlotSta
                         break
                     raw_velocity = item.get("velocity", 127)
                     raw_gate = item.get("gate", 1.0)
+                    raw_timing = item.get("timing", 0.0)
                     if isinstance(raw_velocity, bool) or not isinstance(raw_velocity, (int, float)):
                         valid = False
                         break
                     if isinstance(raw_gate, bool) or not isinstance(raw_gate, (int, float)):
+                        valid = False
+                        break
+                    if isinstance(raw_timing, bool) or not isinstance(raw_timing, (int, float)):
                         valid = False
                         break
                     normalized_steps.append(
@@ -1972,6 +2117,7 @@ def load_memory_state(raw_state: dict[str, Any]) -> dict[str, list[MemorySlotSta
                             value=int(raw_value),
                             velocity=int(raw_velocity),
                             gate=float(raw_gate),
+                            timing=float(raw_timing),
                         )
                     )
                 if not valid:
@@ -2106,7 +2252,9 @@ class RuntimeState:
         self._transition_generation: dict[str, int] = {}
         self._sequencer_positions = {sequencer.state_key: -1 for sequencer in self._sequencers}
         self._sequencer_tick_progress = {sequencer.state_key: 0.0 for sequencer in self._sequencers}
-        self._active_sequencer_notes: dict[str, ActiveSequencerNote] = {}
+        self._active_sequencer_notes: dict[int, ActiveSequencerNote] = {}
+        self._active_sequencer_note_id = 0
+        self._scheduled_sequencer_notes: list[ScheduledSequencerNote] = []
         self._tempo = config.tempo
         self._tempo_bpm = 120.0
         if self._tempo is not None:
@@ -2324,6 +2472,7 @@ class RuntimeState:
             old_midi_outputs = self._midi_outputs
             self._silence_active_buttons_locked()
             self._silence_active_sequencer_notes_locked()
+            self._scheduled_sequencer_notes.clear()
             self._silence_active_notes_locked()
             if new_midi_outputs is not None:
                 self._midi_outputs = new_midi_outputs
@@ -2396,6 +2545,7 @@ class RuntimeState:
                 "speed": normalize_numeric_value(node.speed),
                 "orientation": node.orientation,
                 "color": node.color,
+                "showLabel": node.show_label,
                 "width": serialize_size(node.width),
                 "height": serialize_size(node.height),
                 "osc": serialize_osc_route(node.osc),
@@ -2412,6 +2562,7 @@ class RuntimeState:
                 "scale": node.scale,
                 "root": node.root,
                 "color": node.color,
+                "showLabel": node.show_label,
                 "width": serialize_size(node.width),
                 "height": serialize_size(node.height),
             }
@@ -2424,6 +2575,7 @@ class RuntimeState:
                 "min": node.minimum,
                 "max": node.maximum,
                 "color": node.color,
+                "showLabel": node.show_label,
                 "width": serialize_size(node.width),
                 "height": serialize_size(node.height),
                 "playing": self._transport.is_playing(),
@@ -2445,8 +2597,13 @@ class RuntimeState:
                 "scale": node.scale,
                 "velocityRow": node.velocity_row,
                 "gateRow": node.gate_row,
+                "timingRow": node.timing_row,
+                "defaultVelocity": node.default_velocity,
+                "defaultGate": normalize_numeric_value(node.default_gate),
+                "defaultTiming": normalize_numeric_value(node.default_timing),
                 "maxGateSteps": normalize_numeric_value(node.max_gate_steps),
                 "color": node.color,
+                "showLabel": node.show_label,
                 "width": serialize_size(node.width),
                 "height": serialize_size(node.height),
                 "osc": serialize_osc_route(node.osc),
@@ -2461,6 +2618,7 @@ class RuntimeState:
                 "channel": node.channel,
                 "control": node.control,
                 "color": node.color,
+                "showLabel": node.show_label,
                 "width": serialize_size(node.width),
                 "height": serialize_size(node.height),
                 "osc": serialize_osc_route(node.osc),
@@ -2475,6 +2633,7 @@ class RuntimeState:
                 "transition": normalize_numeric_value(node.transition),
                 "slots": [slot is not None for slot in slots[: node.slots]] + [False] * max(0, node.slots - len(slots)),
                 "color": node.color,
+                "showLabel": node.show_label,
                 "width": serialize_size(node.width),
                 "height": serialize_size(node.height),
             }
@@ -2555,6 +2714,7 @@ class RuntimeState:
 
     def _handle_transport_start(self) -> None:
         with self.lock:
+            self._scheduled_sequencer_notes.clear()
             for sequencer in self._sequencers:
                 self._sequencer_positions[sequencer.state_key] = -1
                 self._sequencer_tick_progress[sequencer.state_key] = 0.0
@@ -2563,6 +2723,7 @@ class RuntimeState:
     def _handle_transport_stop(self) -> None:
         with self.lock:
             self._silence_active_sequencer_notes_locked()
+            self._scheduled_sequencer_notes.clear()
             for sequencer in self._sequencers:
                 self._sequencer_positions[sequencer.state_key] = -1
                 self._sequencer_tick_progress[sequencer.state_key] = 0.0
@@ -2570,6 +2731,7 @@ class RuntimeState:
     def _handle_transport_tick(self) -> None:
         with self.lock:
             self._tick_active_sequencer_notes_locked()
+            self._tick_scheduled_sequencer_notes_locked()
             for sequencer in self._sequencers:
                 if sequencer.size <= 0:
                     continue
@@ -2694,6 +2856,7 @@ class RuntimeState:
                     value=step.value,
                     velocity=step.velocity,
                     gate=step.gate,
+                    timing=step.timing,
                 )
                 for step in self._sequencer_state.get(node.state_key, [])
             ]
@@ -2831,7 +2994,8 @@ class RuntimeState:
 
     def _advance_sequencer_locked(self, sequencer: SequencerConfig) -> None:
         state_key = sequencer.state_key
-        next_index = (self._sequencer_positions.get(state_key, -1) + 1) % sequencer.size
+        previous_index = self._sequencer_positions.get(state_key, -1)
+        next_index = (previous_index + 1) % sequencer.size
         self._sequencer_positions[state_key] = next_index
         steps = self._sequencer_state.get(state_key, [])
         if next_index >= len(steps):
@@ -2841,14 +3005,59 @@ class RuntimeState:
 
         step = steps[next_index]
         if sequencer.mode == "notes":
-            note = step.value if step.enabled else None
-            velocity = step.velocity if step.enabled else 127
-            gate_ticks = sequencer_gate_ticks(sequencer, step.gate) if step.enabled else 0
-            self._send_sequencer_note_locked(sequencer, note, velocity, gate_ticks)
+            if step.timing >= 0 or previous_index < 0:
+                offset_ticks = 0 if previous_index < 0 and step.timing < 0 else step_timing_ticks(
+                    sequencer, step.timing
+                )
+                self._schedule_sequencer_note_locked(sequencer, step, offset_ticks=offset_ticks)
+            following_step = steps[(next_index + 1) % sequencer.size]
+            if following_step.timing < 0:
+                self._schedule_sequencer_note_locked(
+                    sequencer,
+                    following_step,
+                    offset_ticks=step_timing_ticks(sequencer, following_step.timing + 1.0),
+                )
             return
         if step.enabled:
             self._send_sequencer_cc_locked(sequencer, step.value)
             self._send_sequencer_osc_locked(sequencer, step.value)
+
+    def _schedule_sequencer_note_locked(
+        self, sequencer: SequencerConfig, step: SequencerStepState, *, offset_ticks: int
+    ) -> None:
+        if not step.enabled:
+            return
+        gate_ticks = sequencer_gate_ticks(sequencer, step.gate)
+        if offset_ticks <= 0:
+            self._send_sequencer_note_locked(sequencer, step.value, step.velocity, gate_ticks)
+            return
+        self._scheduled_sequencer_notes.append(
+            ScheduledSequencerNote(
+                state_key=sequencer.state_key,
+                note=step.value,
+                velocity=step.velocity,
+                gate_ticks=gate_ticks,
+                remaining_ticks=offset_ticks,
+            )
+        )
+
+    def _tick_scheduled_sequencer_notes_locked(self) -> None:
+        remaining: list[ScheduledSequencerNote] = []
+        for scheduled in self._scheduled_sequencer_notes:
+            scheduled.remaining_ticks -= 1
+            if scheduled.remaining_ticks > 0:
+                remaining.append(scheduled)
+                continue
+            sequencer = self._sequencers_by_key.get(scheduled.state_key)
+            if sequencer is None:
+                continue
+            self._send_sequencer_note_locked(
+                sequencer,
+                scheduled.note,
+                scheduled.velocity,
+                scheduled.gate_ticks,
+            )
+        self._scheduled_sequencer_notes = remaining
 
     def _send_sequencer_note_locked(
         self,
@@ -2857,27 +3066,23 @@ class RuntimeState:
         velocity: int = 127,
         gate_ticks: int = 0,
     ) -> None:
-        current = self._active_sequencer_notes.get(sequencer.state_key)
-        if current is not None:
-            self._send_note_gate_locked(
-                output=sequencer.output, channel=sequencer.channel, note=current.note, gate=False
-            )
-            self._active_sequencer_notes.pop(sequencer.state_key, None)
         if note is None:
             return
         self._send_note_on_locked(
             output=sequencer.output, channel=sequencer.channel, note=note, velocity=velocity
         )
-        self._active_sequencer_notes[sequencer.state_key] = ActiveSequencerNote(
+        self._active_sequencer_note_id += 1
+        self._active_sequencer_notes[self._active_sequencer_note_id] = ActiveSequencerNote(
+            state_key=sequencer.state_key,
             note=note,
             remaining_ticks=max(1, gate_ticks),
         )
 
     def _tick_active_sequencer_notes_locked(self) -> None:
-        for state_key, active in list(self._active_sequencer_notes.items()):
-            sequencer = self._sequencers_by_key.get(state_key)
+        for note_id, active in list(self._active_sequencer_notes.items()):
+            sequencer = self._sequencers_by_key.get(active.state_key)
             if sequencer is None:
-                self._active_sequencer_notes.pop(state_key, None)
+                self._active_sequencer_notes.pop(note_id, None)
                 continue
             active.remaining_ticks -= 1
             if active.remaining_ticks > 0:
@@ -2885,11 +3090,11 @@ class RuntimeState:
             self._send_note_gate_locked(
                 output=sequencer.output, channel=sequencer.channel, note=active.note, gate=False
             )
-            self._active_sequencer_notes.pop(state_key, None)
+            self._active_sequencer_notes.pop(note_id, None)
 
     def _silence_active_sequencer_notes_locked(self) -> None:
-        for state_key, active in list(self._active_sequencer_notes.items()):
-            sequencer = self._sequencers_by_key.get(state_key)
+        for _note_id, active in list(self._active_sequencer_notes.items()):
+            sequencer = self._sequencers_by_key.get(active.state_key)
             if sequencer is None:
                 continue
             self._send_note_gate_locked(
@@ -3061,7 +3266,15 @@ def normalize_sequencer_steps(
         raw_step = raw_steps[index] if index < len(raw_steps) else None
         default_value = default_sequencer_value(sequencer)
         if raw_step is None:
-            steps.append(SequencerStepState(enabled=False, value=default_value))
+            steps.append(
+                SequencerStepState(
+                    enabled=False,
+                    value=default_value,
+                    velocity=sequencer.default_velocity,
+                    gate=quantize_sequencer_gate(sequencer, sequencer.default_gate),
+                    timing=quantize_sequencer_timing(sequencer.default_timing),
+                )
+            )
             continue
         if isinstance(raw_step, SequencerStepState):
             steps.append(
@@ -3070,6 +3283,7 @@ def normalize_sequencer_steps(
                     value=quantize_sequencer_value(sequencer, float(raw_step.value)),
                     velocity=quantize_sequencer_velocity(raw_step.velocity),
                     gate=quantize_sequencer_gate(sequencer, raw_step.gate),
+                    timing=quantize_sequencer_timing(raw_step.timing),
                 )
             )
             continue
@@ -3078,18 +3292,22 @@ def normalize_sequencer_steps(
         raw_value = raw_step.get("value", default_value)
         if isinstance(raw_value, bool) or not isinstance(raw_value, (int, float)):
             raise SystemExit(f"{config_path} {path}[{index}].value must be a number")
-        raw_velocity = raw_step.get("velocity", 127)
+        raw_velocity = raw_step.get("velocity", sequencer.default_velocity)
         if isinstance(raw_velocity, bool) or not isinstance(raw_velocity, (int, float)):
             raise SystemExit(f"{config_path} {path}[{index}].velocity must be a number")
-        raw_gate = raw_step.get("gate", 1.0)
+        raw_gate = raw_step.get("gate", sequencer.default_gate)
         if isinstance(raw_gate, bool) or not isinstance(raw_gate, (int, float)):
             raise SystemExit(f"{config_path} {path}[{index}].gate must be a number")
+        raw_timing = raw_step.get("timing", sequencer.default_timing)
+        if isinstance(raw_timing, bool) or not isinstance(raw_timing, (int, float)):
+            raise SystemExit(f"{config_path} {path}[{index}].timing must be a number")
         steps.append(
             SequencerStepState(
                 enabled=bool(raw_step.get("enabled", False)),
                 value=quantize_sequencer_value(sequencer, float(raw_value)),
                 velocity=quantize_sequencer_velocity(raw_velocity),
                 gate=quantize_sequencer_gate(sequencer, raw_gate),
+                timing=quantize_sequencer_timing(raw_timing),
             )
         )
     return steps
@@ -3131,8 +3349,16 @@ def quantize_sequencer_gate(sequencer: SequencerConfig, value: float) -> float:
     return round(bounded * 100.0) / 100.0
 
 
+def quantize_sequencer_timing(value: float) -> float:
+    return round(clamp_numeric_value(value, minimum=-1.0, maximum=1.0) * 100.0) / 100.0
+
+
 def sequencer_gate_ticks(sequencer: SequencerConfig, gate: float) -> int:
     return max(1, int(round(quantize_sequencer_gate(sequencer, gate) * sequencer.ticks_per_step)))
+
+
+def step_timing_ticks(sequencer: SequencerConfig, timing: float) -> int:
+    return max(0, int(round(quantize_sequencer_timing(timing) * sequencer.ticks_per_step)))
 
 
 def serialize_sequencer_steps(steps: list[SequencerStepState]) -> list[dict[str, Any]]:
@@ -3142,6 +3368,7 @@ def serialize_sequencer_steps(steps: list[SequencerStepState]) -> list[dict[str,
             "value": normalize_numeric_value(step.value),
             "velocity": normalize_numeric_value(step.velocity),
             "gate": normalize_numeric_value(step.gate),
+            "timing": normalize_numeric_value(step.timing),
         }
         for step in steps
     ]

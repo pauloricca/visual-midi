@@ -12,9 +12,11 @@ export function renderMemory(node) {
   wrapper.style.setProperty("--memory-accent", node.color || "#d26a2e");
   wrapper.style.setProperty("--memory-slot-count", String(node.slots.length));
 
-  const title = document.createElement("div");
-  title.className = "memory-title";
-  title.textContent = node.name;
+  const title = node.showLabel === false ? null : document.createElement("div");
+  if (title) {
+    title.className = "memory-title";
+    title.textContent = node.name;
+  }
 
   const slots = document.createElement("div");
   slots.className = "memory-slots";
@@ -94,7 +96,10 @@ export function renderMemory(node) {
     slots.appendChild(button);
   });
 
-  wrapper.append(title, slots);
+  if (title) {
+    wrapper.append(title);
+  }
+  wrapper.append(slots);
   return wrapper;
 }
 

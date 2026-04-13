@@ -16,22 +16,28 @@ export function renderSlider(node) {
   wrapper.dataset.key = node.key;
   applyNodeSizing(wrapper, node);
   wrapper.style.setProperty("--accent", node.color || "#d26a2e");
+  const showLabel = node.showLabel !== false;
 
   const fill = document.createElement("div");
   fill.className = "control-fill";
 
-  const chrome = document.createElement("div");
-  chrome.className = "control-chrome";
+  let title = null;
+  if (showLabel) {
+    const chrome = document.createElement("div");
+    chrome.className = "control-chrome";
 
-  const title = document.createElement("div");
-  title.className = "control-title";
+    title = document.createElement("div");
+    title.className = "control-title";
 
-  const meta = document.createElement("div");
-  meta.className = "control-meta";
-  meta.textContent = buildSliderMeta(node);
+    const meta = document.createElement("div");
+    meta.className = "control-meta";
+    meta.textContent = buildSliderMeta(node);
 
-  chrome.append(meta, title);
-  wrapper.append(fill, chrome);
+    chrome.append(meta, title);
+    wrapper.append(fill, chrome);
+  } else {
+    wrapper.append(fill);
+  }
 
   const state = {
     ...node,
@@ -135,7 +141,9 @@ export function queueSliderUpdate(state, value) {
 export function updateSliderVisuals(state, value) {
   state.value = value;
   const percentage = ((value - state.min) / (state.max - state.min || 1)) * 100;
-  state.title.textContent = state.name;
+  if (state.title) {
+    state.title.textContent = state.name;
+  }
 
   if (state.orientation === "vertical") {
     state.fill.style.height = `${percentage}%`;

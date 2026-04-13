@@ -106,6 +106,7 @@ Supported control fields:
 - `type`: optional, `slider`, `lfo`, `keyboard`, `button`, `tempo`, `sequencer`, or `memory`, defaults to `slider`; `lfo` is kept as a compatibility alias for a slider that opens in the LFO controls
 - `name`
 - `color`: any CSS color string or a name from the root `palette`, optional when inherited from a parent container
+- `show_label`: optional boolean, defaults to `true`; set `false` to hide the control title and MIDI/OSC metadata, may be inherited from a parent container
 - `width`, `height`: optional `%` or `px` sizes for the control tile
 
 Controls that send channel messages use:
@@ -178,10 +179,14 @@ Supported sequencer fields:
 - `subdivision`: required step timing as a note fraction like `1/16` or a positive beat value
 - `channel`: MIDI channel from `1` to `16`
 - `min`, `max`: optional value range, defaults to `0..127`
-- `root`, `scale`: optional for `notes`; when both are present, step values are quantized to that scale and `root` becomes the default value when enabling a step
-- `velocity`/`vel`/`v`: optional boolean for `notes`; shows a per-step `v` row and sends that MIDI note velocity, default `false`
-- `gate`/`h`: optional boolean for `notes`; shows a per-step `h` row for note hold length in steps, default `false`
-- `max_gate_steps`: optional number `>= 1` for `notes`; maximum `h` value in steps, default `1`
+- `root`, `scale`: optional for `notes`; when both are present, step values are quantized to that scale and `root` becomes the initial value for new steps
+- `velocity`: optional default note velocity from `1` to `127`, used even when the velocity row is hidden, default `127`
+- `gate`: optional default note hold length in steps, used even when the gate row is hidden, must be greater than `0` and no greater than `max_gate_steps`, default `1`
+- `timing`: optional default micro timing from `-1` to `1`, where `-1` is the previous step boundary, `0` is the current step boundary, and `1` is the next step boundary, default `0`
+- `velocity_row`/`show_velocity`: optional boolean for `notes`; shows a per-step velocity row, default `false`
+- `gate_row`/`show_gate`: optional boolean for `notes`; shows a per-step gate row, default `false`
+- `timing_row`/`show_timing`: optional boolean for `notes`; shows a per-step micro timing row, default `false`
+- `max_gate_steps`: optional number `>= 1` for `notes`; maximum gate value in steps, default `1`
 - `control`: optional for `cc`; required unless an `osc` route is present
 - `osc`: optional for `cc`; if present, the step value is mapped through `osc.min`/`osc.max` like a slider
 - sequencers require a tempo control somewhere in the same config

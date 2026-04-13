@@ -141,17 +141,23 @@ function mountSliderSurface(state) {
   const fill = document.createElement("div");
   fill.className = "control-fill";
 
-  const chrome = document.createElement("div");
-  chrome.className = "control-chrome";
+  let title = null;
+  let meta = null;
+  if (state.showLabel !== false) {
+    const chrome = document.createElement("div");
+    chrome.className = "control-chrome";
 
-  const title = document.createElement("div");
-  title.className = "control-title";
+    title = document.createElement("div");
+    title.className = "control-title";
 
-  const meta = document.createElement("div");
-  meta.className = "control-meta";
+    meta = document.createElement("div");
+    meta.className = "control-meta";
 
-  chrome.append(meta, title);
-  surface.append(fill, chrome);
+    chrome.append(meta, title);
+    surface.append(fill, chrome);
+  } else {
+    surface.append(fill);
+  }
   state.element.replaceChildren(surface);
   state.mode = "slider";
   state.fill = fill;
@@ -245,17 +251,23 @@ function mountSimpleLfoControls(state) {
   const fill = document.createElement("div");
   fill.className = "control-fill";
 
-  const chrome = document.createElement("div");
-  chrome.className = "control-chrome";
+  let title = null;
+  let meta = null;
+  if (state.showLabel !== false) {
+    const chrome = document.createElement("div");
+    chrome.className = "control-chrome";
 
-  const title = document.createElement("div");
-  title.className = "control-title";
+    title = document.createElement("div");
+    title.className = "control-title";
 
-  const meta = document.createElement("div");
-  meta.className = "control-meta";
+    meta = document.createElement("div");
+    meta.className = "control-meta";
 
-  chrome.append(meta, title);
-  surface.append(fill, chrome);
+    chrome.append(meta, title);
+    surface.append(fill, chrome);
+  } else {
+    surface.append(fill);
+  }
   state.element.replaceChildren(surface);
   state.mode = "simple";
   state.fill = fill;
@@ -335,9 +347,11 @@ function mountComplexLfoControls(state) {
   const animatedFill = document.createElement("div");
   animatedFill.className = "lfo-complex-fill";
 
-  const title = document.createElement("div");
-  title.className = "lfo-complex-title";
-  title.textContent = state.name;
+  const title = state.showLabel === false ? null : document.createElement("div");
+  if (title) {
+    title.className = "lfo-complex-title";
+    title.textContent = state.name;
+  }
 
   const grid = document.createElement("div");
   grid.className = "lfo-grid";
@@ -349,7 +363,10 @@ function mountComplexLfoControls(state) {
   };
 
   grid.append(panels.value.element, panels.depth.element, panels.rate.element, panels.shape.element);
-  surface.append(animatedFill, grid, title);
+  surface.append(animatedFill, grid);
+  if (title) {
+    surface.append(title);
+  }
   state.element.replaceChildren(surface);
   state.mode = "complex";
   state.fill = null;
@@ -711,8 +728,12 @@ function stopLfoAnimation(state) {
 function updateLfoVisuals(state, value) {
   state.value = value;
   if (state.mode === "slider") {
-    state.title.textContent = state.name;
-    state.meta.textContent = buildSliderMeta(state);
+    if (state.title) {
+      state.title.textContent = state.name;
+    }
+    if (state.meta) {
+      state.meta.textContent = buildSliderMeta(state);
+    }
     if (state.orientation === "vertical") {
       state.fill.style.height = `${sliderValueRatio(state, state.value) * 100}%`;
       state.fill.style.width = "100%";
@@ -727,8 +748,12 @@ function updateLfoVisuals(state, value) {
     return;
   }
 
-  state.title.textContent = state.name;
-  state.meta.textContent = buildLfoMeta(state);
+  if (state.title) {
+    state.title.textContent = state.name;
+  }
+  if (state.meta) {
+    state.meta.textContent = buildLfoMeta(state);
+  }
   updateLfoRangeFill(state.fill, (state.value - state.min) / (state.max - state.min || 1));
 }
 

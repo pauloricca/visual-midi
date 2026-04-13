@@ -441,9 +441,7 @@ a,
   align-items: flex-start;
   justify-content: center;
   padding: 12px 8px 8px;
-  overflow: hidden;
   white-space: nowrap;
-  text-overflow: ellipsis;
 }
 
 .keyboard-key--scale:last-child {
@@ -710,7 +708,8 @@ a,
   min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-rows: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 2fr);
+  grid-auto-rows: minmax(0, 1fr);
 }
 
 .sequencer-step {
@@ -770,14 +769,12 @@ a,
   letter-spacing: 0.03em;
   line-height: 1;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   text-align: center;
 }
 
 .sequencer-param-row {
   min-width: 0;
-  min-height: 34px;
+  min-height: 0;
   display: grid;
   grid-template-columns: repeat(var(--sequencer-size), minmax(0, 1fr));
   border-top: 1px solid black;
@@ -786,7 +783,7 @@ a,
 .sequencer-param-cell {
   appearance: none;
   min-width: 0;
-  min-height: 34px;
+  min-height: 0;
   position: relative;
   border: 0;
   border-right: 1px solid black;
@@ -795,6 +792,10 @@ a,
   color: black;
   overflow: hidden;
   touch-action: none;
+  cursor: ew-resize;
+}
+
+.sequencer-param-row--vertical .sequencer-param-cell {
   cursor: ns-resize;
 }
 
@@ -806,8 +807,15 @@ a,
   position: absolute;
   inset: 0 auto 0 0;
   width: 0;
+  height: 100%;
   background: color-mix(in srgb, var(--sequencer-accent) 62%, white);
   opacity: 0.82;
+}
+
+.sequencer-param-row--vertical .sequencer-param-fill {
+  inset: auto 0 0 0;
+  width: 100%;
+  height: 0;
 }
 
 .sequencer-param-value {
@@ -823,8 +831,6 @@ a,
   line-height: 1;
   letter-spacing: 0;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .sequencer-chrome {

@@ -1,0 +1,669 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "$id": "https://visual-midi.local/schemas/visual-midi.schema.json",
+  "title": "visual-midi YAML config",
+  "description": "Schema for visual-midi controller configuration files.",
+  "type": "object",
+  "required": ["output"],
+  "allOf": [
+    {
+      "oneOf": [
+        { "required": ["rows"] },
+        { "required": ["columns"] },
+        { "required": ["tabs"] }
+      ]
+    }
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional title displayed by the app."
+    },
+    "output": {
+      "$ref": "#/definitions/nonEmptyString",
+      "description": "MIDI output device name."
+    },
+    "inertia": {
+      "$ref": "#/definitions/nonNegativeNumber",
+      "description": "Global release throw multiplier. Use 0 to disable inertia."
+    },
+    "osc": {
+      "$ref": "#/definitions/oscOutput"
+    },
+    "palette": {
+      "$ref": "#/definitions/palette"
+    },
+    "rows": {
+      "$ref": "#/definitions/layoutChildren"
+    },
+    "columns": {
+      "$ref": "#/definitions/layoutChildren"
+    },
+    "tabs": {
+      "$ref": "#/definitions/tabs"
+    },
+    "channel": {
+      "$ref": "#/definitions/midiChannel"
+    },
+    "default": {
+      "$ref": "#/definitions/midiValue"
+    },
+    "min": {
+      "$ref": "#/definitions/midiValue"
+    },
+    "max": {
+      "$ref": "#/definitions/midiValue"
+    },
+    "steps": {
+      "$ref": "#/definitions/steps"
+    },
+    "speed": {
+      "$ref": "#/definitions/positiveNumber"
+    },
+    "quantize_speed": {
+      "type": "boolean"
+    },
+    "orientation": {
+      "$ref": "#/definitions/orientation"
+    },
+    "color": {
+      "$ref": "#/definitions/nonEmptyString"
+    },
+    "show_label": {
+      "type": "boolean"
+    }
+  },
+  "definitions": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "positiveNumber": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "nonNegativeNumber": {
+      "type": "number",
+      "minimum": 0
+    },
+    "midiChannel": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 16
+    },
+    "midiValue": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 127
+    },
+    "midiControl": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 127
+    },
+    "midiNote": {
+      "oneOf": [
+        {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 127
+        },
+        {
+          "type": "string",
+          "pattern": "^\\s*[A-Ga-g][#b]*-?\\d+\\s*$",
+          "examples": ["C2", "Bb3", "B#2"]
+        }
+      ]
+    },
+    "size": {
+      "oneOf": [
+        {
+          "type": "number",
+          "minimum": 0
+        },
+        {
+          "type": "string",
+          "pattern": "^\\s*\\d+(?:\\.\\d+)?\\s*(%|px)\\s*$",
+          "examples": ["70%", "240px"]
+        }
+      ]
+    },
+    "steps": {
+      "type": "integer",
+      "minimum": 2
+    },
+    "orientation": {
+      "type": "string",
+      "enum": ["horizontal", "vertical"]
+    },
+    "scaleName": {
+      "type": "string",
+      "enum": [
+        "major",
+        "minor",
+        "natural_minor",
+        "harmonic_minor",
+        "melodic_minor",
+        "ionian",
+        "dorian",
+        "phrygian",
+        "lydian",
+        "mixolydian",
+        "aeolian",
+        "locrian",
+        "major_pentatonic",
+        "minor_pentatonic",
+        "blues",
+        "chromatic",
+        "whole_tone",
+        "diminished_half_whole",
+        "diminished_whole_half"
+      ]
+    },
+    "subdivision": {
+      "oneOf": [
+        {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        {
+          "type": "string",
+          "pattern": "^\\s*\\d+\\s*/\\s*\\d+\\s*$",
+          "examples": ["1/16", "1/8"]
+        }
+      ]
+    },
+    "palette": {
+      "type": "object",
+      "description": "Named CSS colors that can be referenced by color fields.",
+      "additionalProperties": {
+        "$ref": "#/definitions/nonEmptyString"
+      }
+    },
+    "oscOutput": {
+      "type": "object",
+      "required": ["host", "port"],
+      "additionalProperties": false,
+      "properties": {
+        "host": {
+          "$ref": "#/definitions/nonEmptyString"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        }
+      }
+    },
+    "oscRoute": {
+      "type": "object",
+      "required": ["path"],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "$ref": "#/definitions/nonEmptyString"
+        },
+        "min": {
+          "type": "number",
+          "default": 0
+        },
+        "max": {
+          "type": "number",
+          "default": 1
+        }
+      }
+    },
+    "layoutChildren": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/definitions/layoutNode"
+      }
+    },
+    "layoutNode": {
+      "oneOf": [
+        { "$ref": "#/definitions/rowsContainer" },
+        { "$ref": "#/definitions/columnsContainer" },
+        { "$ref": "#/definitions/tabsContainer" },
+        { "$ref": "#/definitions/sliderControl" },
+        { "$ref": "#/definitions/lfoControl" },
+        { "$ref": "#/definitions/keyboardControl" },
+        { "$ref": "#/definitions/buttonControl" },
+        { "$ref": "#/definitions/tempoControl" },
+        { "$ref": "#/definitions/sequencerControl" },
+        { "$ref": "#/definitions/memoryControl" }
+      ]
+    },
+    "containerBase": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "$ref": "#/definitions/nonEmptyString"
+        },
+        "output": {
+          "$ref": "#/definitions/nonEmptyString"
+        },
+        "channel": {
+          "$ref": "#/definitions/midiChannel"
+        },
+        "default": {
+          "$ref": "#/definitions/midiValue"
+        },
+        "min": {
+          "$ref": "#/definitions/midiValue"
+        },
+        "max": {
+          "$ref": "#/definitions/midiValue"
+        },
+        "steps": {
+          "$ref": "#/definitions/steps"
+        },
+        "speed": {
+          "$ref": "#/definitions/positiveNumber"
+        },
+        "quantize_speed": {
+          "type": "boolean"
+        },
+        "orientation": {
+          "$ref": "#/definitions/orientation"
+        },
+        "color": {
+          "$ref": "#/definitions/nonEmptyString"
+        },
+        "show_label": {
+          "type": "boolean"
+        },
+        "width": {
+          "$ref": "#/definitions/size"
+        },
+        "height": {
+          "$ref": "#/definitions/size"
+        }
+      }
+    },
+    "rowsContainer": {
+      "allOf": [
+        { "$ref": "#/definitions/containerBase" },
+        {
+          "type": "object",
+          "required": ["rows"],
+          "properties": {
+            "rows": {
+              "$ref": "#/definitions/layoutChildren"
+            }
+          }
+        }
+      ]
+    },
+    "columnsContainer": {
+      "allOf": [
+        { "$ref": "#/definitions/containerBase" },
+        {
+          "type": "object",
+          "required": ["columns"],
+          "properties": {
+            "columns": {
+              "$ref": "#/definitions/layoutChildren"
+            }
+          }
+        }
+      ]
+    },
+    "tabsContainer": {
+      "allOf": [
+        { "$ref": "#/definitions/containerBase" },
+        {
+          "type": "object",
+          "required": ["tabs"],
+          "properties": {
+            "tabs": {
+              "$ref": "#/definitions/tabs"
+            }
+          }
+        }
+      ]
+    },
+    "tabs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["tab"],
+        "additionalProperties": false,
+        "properties": {
+          "tab": {
+            "$ref": "#/definitions/tab"
+          }
+        }
+      }
+    },
+    "tab": {
+      "allOf": [
+        { "$ref": "#/definitions/containerBase" },
+        {
+          "type": "object",
+          "required": ["name"],
+          "oneOf": [
+            { "required": ["rows"] },
+            { "required": ["columns"] },
+            { "required": ["tabs"] }
+          ],
+          "properties": {
+            "name": {
+              "$ref": "#/definitions/nonEmptyString"
+            },
+            "rows": {
+              "$ref": "#/definitions/layoutChildren"
+            },
+            "columns": {
+              "$ref": "#/definitions/layoutChildren"
+            },
+            "tabs": {
+              "$ref": "#/definitions/tabs"
+            }
+          }
+        }
+      ]
+    },
+    "controlBase": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "name": {
+          "$ref": "#/definitions/nonEmptyString"
+        },
+        "output": {
+          "$ref": "#/definitions/nonEmptyString"
+        },
+        "color": {
+          "$ref": "#/definitions/nonEmptyString"
+        },
+        "show_label": {
+          "type": "boolean"
+        },
+        "width": {
+          "$ref": "#/definitions/size"
+        },
+        "height": {
+          "$ref": "#/definitions/size"
+        }
+      }
+    },
+    "channelMessageBase": {
+      "type": "object",
+      "properties": {
+        "channel": {
+          "$ref": "#/definitions/midiChannel"
+        }
+      }
+    },
+    "sliderFields": {
+      "type": "object",
+      "required": ["control"],
+      "properties": {
+        "control": {
+          "$ref": "#/definitions/midiControl"
+        },
+        "default": {
+          "$ref": "#/definitions/midiValue"
+        },
+        "min": {
+          "$ref": "#/definitions/midiValue"
+        },
+        "max": {
+          "$ref": "#/definitions/midiValue"
+        },
+        "steps": {
+          "$ref": "#/definitions/steps"
+        },
+        "speed": {
+          "$ref": "#/definitions/positiveNumber"
+        },
+        "orientation": {
+          "$ref": "#/definitions/orientation"
+        },
+        "osc": {
+          "$ref": "#/definitions/oscRoute"
+        },
+        "complex": {
+          "type": "boolean"
+        },
+        "max_speed": {
+          "$ref": "#/definitions/nonNegativeNumber"
+        },
+        "quantize_speed": {
+          "type": "boolean"
+        },
+        "waveforms": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": ["sine", "triangle", "square", "saw", "ramp", "random", "s&h"]
+          }
+        },
+        "shape_control": {
+          "type": "string",
+          "enum": ["waveform", "jitter"]
+        }
+      }
+    },
+    "sliderControl": {
+      "allOf": [
+        { "$ref": "#/definitions/controlBase" },
+        { "$ref": "#/definitions/channelMessageBase" },
+        { "$ref": "#/definitions/sliderFields" },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "enum": ["slider"]
+            }
+          }
+        }
+      ]
+    },
+    "lfoControl": {
+      "allOf": [
+        { "$ref": "#/definitions/controlBase" },
+        { "$ref": "#/definitions/channelMessageBase" },
+        { "$ref": "#/definitions/sliderFields" },
+        {
+          "type": "object",
+          "required": ["type"],
+          "properties": {
+            "type": {
+              "const": "lfo"
+            }
+          }
+        }
+      ]
+    },
+    "keyboardControl": {
+      "allOf": [
+        { "$ref": "#/definitions/controlBase" },
+        { "$ref": "#/definitions/channelMessageBase" },
+        {
+          "type": "object",
+          "required": ["type"],
+          "properties": {
+            "type": {
+              "const": "keyboard"
+            },
+            "start": {
+              "$ref": "#/definitions/midiNote"
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "scale": {
+              "$ref": "#/definitions/scaleName"
+            },
+            "root": {
+              "$ref": "#/definitions/midiNote"
+            }
+          }
+        }
+      ]
+    },
+    "buttonControl": {
+      "allOf": [
+        { "$ref": "#/definitions/controlBase" },
+        { "$ref": "#/definitions/channelMessageBase" },
+        {
+          "type": "object",
+          "required": ["type", "control"],
+          "properties": {
+            "type": {
+              "const": "button"
+            },
+            "control": {
+              "$ref": "#/definitions/midiControl"
+            },
+            "osc": {
+              "$ref": "#/definitions/oscRoute"
+            }
+          }
+        }
+      ]
+    },
+    "tempoControl": {
+      "allOf": [
+        { "$ref": "#/definitions/controlBase" },
+        {
+          "type": "object",
+          "required": ["type"],
+          "properties": {
+            "type": {
+              "const": "tempo"
+            },
+            "default": {
+              "type": "number"
+            },
+            "min": {
+              "type": "number"
+            },
+            "max": {
+              "type": "number"
+            }
+          }
+        }
+      ]
+    },
+    "sequencerControl": {
+      "allOf": [
+        { "$ref": "#/definitions/controlBase" },
+        { "$ref": "#/definitions/channelMessageBase" },
+        {
+          "type": "object",
+          "required": ["type", "mode", "size", "subdivision"],
+          "properties": {
+            "type": {
+              "const": "sequencer"
+            },
+            "mode": {
+              "type": "string",
+              "enum": ["notes", "cc"]
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "subdivision": {
+              "$ref": "#/definitions/subdivision"
+            },
+            "control": {
+              "$ref": "#/definitions/midiControl"
+            },
+            "min": {
+              "$ref": "#/definitions/midiValue"
+            },
+            "max": {
+              "$ref": "#/definitions/midiValue"
+            },
+            "root": {
+              "$ref": "#/definitions/midiNote"
+            },
+            "scale": {
+              "$ref": "#/definitions/scaleName"
+            },
+            "velocity": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 127
+            },
+            "gate": {
+              "$ref": "#/definitions/positiveNumber"
+            },
+            "timing": {
+              "type": "number",
+              "minimum": -1,
+              "maximum": 1
+            },
+            "velocity_row": {
+              "type": "boolean"
+            },
+            "show_velocity": {
+              "type": "boolean"
+            },
+            "gate_row": {
+              "type": "boolean"
+            },
+            "show_gate": {
+              "type": "boolean"
+            },
+            "timing_row": {
+              "type": "boolean"
+            },
+            "show_timing": {
+              "type": "boolean"
+            },
+            "max_gate_steps": {
+              "$ref": "#/definitions/positiveNumber"
+            },
+            "max_gate": {
+              "$ref": "#/definitions/positiveNumber"
+            },
+            "gate_max": {
+              "$ref": "#/definitions/positiveNumber"
+            },
+            "osc": {
+              "$ref": "#/definitions/oscRoute"
+            }
+          }
+        }
+      ]
+    },
+    "memoryControl": {
+      "allOf": [
+        { "$ref": "#/definitions/controlBase" },
+        {
+          "type": "object",
+          "required": ["type", "target", "slots"],
+          "properties": {
+            "type": {
+              "const": "memory"
+            },
+            "target": {
+              "$ref": "#/definitions/nonEmptyString"
+            },
+            "slots": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "transition": {
+              "$ref": "#/definitions/nonNegativeNumber"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

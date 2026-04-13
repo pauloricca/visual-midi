@@ -1,0 +1,32 @@
+output: IAC Driver Bus 1
+osc:
+  host: 127.0.0.1
+  port: 9000
+palette:
+  orange: "#d26a2e"
+  moss: "#5f8f6b"
+  clay: "#b85d45"
+  slate: "#5077b5"
+  sand: "#c8a76a"
+  plum: "#8a5a7c"
+  teal: "#4f8f88"
+quantize_speed: true
+columns:
+  - name: amp
+    control: 3
+  - name: hp cuttoff
+    control: 19
+  - name: hp peak
+    control: 20
+  - name: lp cuttoff
+    control: 17
+  - name: lp peak
+    control: 18
+  - name: distortion
+    control: 16
+  - name: saw freq
+    control: 0
+  - name: saw range min
+    control: 1
+  - name: saw range max
+    control: 2

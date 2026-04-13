@@ -196,11 +196,13 @@ rows:
     columns:
       - type: keyboard
         name: Keys
+        show_label: false
         start: C3
         size: 24
         color: play
       - type: sequencer
         name: Note Seq
+        show_label: false
         mode: notes
         size: 16
         subdivision: 1/16
@@ -208,7 +210,11 @@ rows:
         scale: minor
         min: 36
         max: 84
-        velocity: true
-        gate: true
+        velocity: 127
+        gate: 1
+        timing: 0
+        velocity_row: true
+        gate_row: true
+        timing_row: true
         max_gate_steps: 4
         color: arp

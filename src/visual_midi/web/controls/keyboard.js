@@ -14,18 +14,21 @@ export function renderKeyboard(node) {
   applyNodeSizing(wrapper, node);
   wrapper.style.setProperty("--keyboard-accent", node.color || "#d26a2e");
 
-  const chrome = document.createElement("div");
-  chrome.className = "keyboard-chrome";
+  let chrome = null;
+  if (node.showLabel !== false) {
+    chrome = document.createElement("div");
+    chrome.className = "keyboard-chrome";
 
-  const meta = document.createElement("div");
-  meta.className = "keyboard-meta";
-  meta.textContent = buildKeyboardMeta(node);
+    const meta = document.createElement("div");
+    meta.className = "keyboard-meta";
+    meta.textContent = buildKeyboardMeta(node);
 
-  const title = document.createElement("div");
-  title.className = "keyboard-title";
-  title.textContent = node.name;
+    const title = document.createElement("div");
+    title.className = "keyboard-title";
+    title.textContent = node.name;
 
-  chrome.append(meta, title);
+    chrome.append(meta, title);
+  }
 
   const surface = document.createElement("div");
   surface.className = "keyboard-surface";
@@ -141,7 +144,10 @@ export function renderKeyboard(node) {
 
     surface.append(whiteLayer, blackLayer);
   }
-  wrapper.append(surface, chrome);
+  wrapper.append(surface);
+  if (chrome) {
+    wrapper.append(chrome);
+  }
 
   const resolveNoteFromPointer = (event) => {
     const target = document.elementFromPoint(event.clientX, event.clientY);

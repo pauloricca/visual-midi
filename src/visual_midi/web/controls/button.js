@@ -8,15 +8,17 @@ export function renderButton(node) {
   applyNodeSizing(wrapper, node);
   wrapper.style.setProperty("--button-accent", node.color || "#d26a2e");
 
-  const meta = document.createElement("div");
-  meta.className = "button-meta";
-  meta.textContent = buildButtonMeta(node);
+  if (node.showLabel !== false) {
+    const meta = document.createElement("div");
+    meta.className = "button-meta";
+    meta.textContent = buildButtonMeta(node);
 
-  const title = document.createElement("div");
-  title.className = "button-title";
-  title.textContent = node.name;
+    const title = document.createElement("div");
+    title.className = "button-title";
+    title.textContent = node.name;
 
-  wrapper.append(meta, title);
+    wrapper.append(meta, title);
+  }
 
   const activePointers = new Set();
 
