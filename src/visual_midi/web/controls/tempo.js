@@ -4,6 +4,9 @@ import { applyNodeSizing } from "../utils/layout.js";
 import { syncTransportState } from "./sequencer.js";
 import { syncLfoTransportState } from "./lfo.js";
 
+let currentTempoState = null;
+let tempoShortcutsInstalled = false;
+
 export function renderTempo(node) {
   const wrapper = document.createElement("article");
   wrapper.className = "tempo-control";
@@ -46,6 +49,7 @@ export function renderTempo(node) {
     dragStartValue: node.value,
     wheelRemainder: 0,
   };
+  currentTempoState = state;
 
   updateTempoVisuals(state, node.value, node.playing);
 
@@ -111,12 +115,53 @@ export function renderTempo(node) {
   return wrapper;
 }
 
+export function clearTempoViews() {
+  currentTempoState = null;
+}
+
+export function installTempoShortcuts() {
+  if (tempoShortcutsInstalled) {
+    return;
+  }
+  tempoShortcutsInstalled = true;
+  document.addEventListener(
+    "keydown",
+    (event) => {
+      if (!isSpaceKey(event) || event.repeat || !currentTempoState) {
+        return;
+      }
+      if (isEditableTarget(event.target)) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      void sendTransportState(currentTempoState, !currentTempoState.playing);
+    },
+    { capture: true }
+  );
+}
+
 export function updateTempoVisuals(state, value, playing) {
   state.value = quantizeTempoValue(value);
   state.playing = Boolean(playing);
   state.valueNode.textContent = state.value.toFixed(1);
   state.transportButton.setAttribute("aria-label", state.playing ? "Stop transport" : "Start transport");
   state.transportButton.classList.toggle("is-active", state.playing);
+}
+
+function isSpaceKey(event) {
+  return event.code === "Space" || event.key === " ";
+}
+
+function isEditableTarget(target) {
+  if (!(target instanceof Element)) {
+    return false;
+  }
+  const editable = target.closest("input, textarea, select, [contenteditable]");
+  if (!editable) {
+    return false;
+  }
+  return editable.getAttribute("contenteditable") !== "false";
 }
 
 function queueTempoUpdate(state, value) {

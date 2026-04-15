@@ -3,6 +3,7 @@ import { appHeader, layoutRoot, qrImage, qrLink, qrPanel, titleNode } from "./do
 import { renderLayoutWithConfig } from "./layout.js";
 import { clearSequencerViews, syncTransportState } from "./controls/sequencer.js";
 import { clearLfoViews, syncLfoTransportState } from "./controls/lfo.js";
+import { clearTempoViews, installTempoShortcuts } from "./controls/tempo.js";
 
 let currentVersion = null;
 let pollTimer = null;
@@ -34,6 +35,7 @@ function applyPayload(payload, options = {}) {
   }
   clearSequencerViews();
   clearLfoViews();
+  clearTempoViews();
   layoutRoot.replaceChildren(renderLayoutWithConfig(renderPayload.layout, renderPayload));
   syncTransportState(payload.transport, { resetAnchors: true });
   syncLfoTransportState(payload.transport);
@@ -43,6 +45,7 @@ function applyPayload(payload, options = {}) {
 }
 
 export async function loadApp() {
+  installTempoShortcuts();
   const payload = await fetchConfig();
   applyPayload(payload);
 }

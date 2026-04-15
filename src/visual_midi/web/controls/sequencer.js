@@ -113,13 +113,14 @@ export function renderSequencer(node) {
       parent: editor,
       key: "velocity",
       label: "velocity",
+      shortLabel: "v",
       elements: state.velocityElements,
       normalizeValue: normalizeSequencerVelocity,
       resetValue: () => defaultSequencerVelocity(state),
       min: 1,
       max: 127,
       steps: 127,
-      orientation: "vertical",
+      orientation: "horizontal",
     });
   }
 
@@ -129,6 +130,7 @@ export function renderSequencer(node) {
       parent: editor,
       key: "gate",
       label: "gate",
+      shortLabel: "g",
       elements: state.gateElements,
       normalizeValue: (value) => normalizeSequencerGate(state, value),
       resetValue: () => defaultSequencerGate(state),
@@ -145,6 +147,7 @@ export function renderSequencer(node) {
       parent: editor,
       key: "timing",
       label: "timing",
+      shortLabel: "t",
       elements: state.timingElements,
       normalizeValue: normalizeSequencerTiming,
       resetValue: () => defaultSequencerTiming(state),
@@ -324,6 +327,7 @@ function renderSequencerParamRow({
   parent,
   key,
   label,
+  shortLabel,
   elements,
   normalizeValue,
   resetValue,
@@ -366,6 +370,7 @@ function renderSequencerParamRow({
 
     const value = document.createElement("div");
     value.className = "sequencer-param-value";
+    value.textContent = shortLabel;
 
     cell.append(value);
     row.appendChild(cell);
@@ -374,6 +379,7 @@ function renderSequencerParamRow({
       fill,
       value,
       label,
+      shortLabel,
       orientation,
       slider: paramSlider,
       lastTapAt: 0,
@@ -394,7 +400,7 @@ function updateParamElement(element, rawValue) {
     return;
   }
   element.slider.setValue(rawValue, { silent: true });
-  element.value.textContent = "";
+  element.value.textContent = element.shortLabel;
 }
 
 function normalizeSequencerVelocity(value, defaultValue = 127) {

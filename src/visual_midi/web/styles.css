@@ -187,6 +187,18 @@ a,
   height: 100%;
 }
 
+.ui-button {
+  appearance: none;
+  min-width: 0;
+  min-height: 0;
+  border-radius: 0;
+  color: black;
+  font: inherit;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 .control {
   min-width: 0;
   min-height: 0;
@@ -529,6 +541,11 @@ a,
 
 .button-control.is-active {
   background: color-mix(in srgb, var(--button-accent) 85%, white);
+}
+
+.button-control:focus-visible {
+  outline: 2px solid black;
+  outline-offset: 2px;
 }
 
 .button-title {
@@ -917,10 +934,13 @@ a,
   align-items: center;
   justify-content: center;
   color: black;
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   font-weight: 700;
   line-height: 1;
   letter-spacing: 0;
+  opacity: 0.55;
+  pointer-events: none;
+  text-transform: lowercase;
   white-space: nowrap;
 }
 

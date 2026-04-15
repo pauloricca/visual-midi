@@ -245,6 +245,11 @@ class MutatorConfig:
     name: str
     target: str
     default: float = 0.5
+    mutate_sequencer_note: bool = True
+    mutate_sequencer_step: bool = True
+    mutate_sequencer_velocity: bool = True
+    mutate_sequencer_gate: bool = True
+    mutate_sequencer_timing: bool = True
     color: str = "#d26a2e"
     show_label: bool = True
     width: SizeSpec | None = None
@@ -1489,6 +1494,41 @@ def parse_mutator(
             default=parse_unit_interval(
                 raw.get("default", 0.5), config_path=config_path, path=f"{path}.default"
             ),
+            mutate_sequencer_note=parse_optional_boolean_alias(
+                raw,
+                keys=("note",),
+                default=True,
+                config_path=config_path,
+                path=path,
+            ),
+            mutate_sequencer_step=parse_optional_boolean_alias(
+                raw,
+                keys=("step",),
+                default=True,
+                config_path=config_path,
+                path=path,
+            ),
+            mutate_sequencer_velocity=parse_optional_boolean_alias(
+                raw,
+                keys=("velocity",),
+                default=True,
+                config_path=config_path,
+                path=path,
+            ),
+            mutate_sequencer_gate=parse_optional_boolean_alias(
+                raw,
+                keys=("gate",),
+                default=True,
+                config_path=config_path,
+                path=path,
+            ),
+            mutate_sequencer_timing=parse_optional_boolean_alias(
+                raw,
+                keys=("timing",),
+                default=True,
+                config_path=config_path,
+                path=path,
+            ),
             color=resolve_color(
                 raw.get("color", defaults.color),
                 palette=palette,
@@ -2043,7 +2083,7 @@ def validate_mutator_targets(
             raise SystemExit(
                 f"{config_path} mutator '{mutator.name}' target '{mutator.target}' does not match any named control or container"
             )
-        if not target_has_recallable_state(target):
+        if not target_has_mutable_state(target, mutator):
             raise SystemExit(
                 f"{config_path} mutator '{mutator.name}' target '{mutator.target}' has no mutable controls"
             )
@@ -2084,6 +2124,30 @@ def target_has_recallable_state(node: LayoutNode) -> bool:
     if isinstance(node, TabsConfig):
         return any(target_has_recallable_state(tab.content) for tab in node.tabs)
     return any(target_has_recallable_state(child) for child in node.children)
+
+
+def target_has_mutable_state(node: LayoutNode, mutator: MutatorConfig) -> bool:
+    if isinstance(node, (SliderConfig, TempoConfig)):
+        return True
+    if isinstance(node, SequencerConfig):
+        return mutator_can_mutate_sequencer(mutator)
+    if isinstance(node, (KeyboardConfig, ButtonConfig, MemoryConfig, MutatorConfig)):
+        return False
+    if isinstance(node, TabsConfig):
+        return any(target_has_mutable_state(tab.content, mutator) for tab in node.tabs)
+    return any(target_has_mutable_state(child, mutator) for child in node.children)
+
+
+def mutator_can_mutate_sequencer(mutator: MutatorConfig) -> bool:
+    return any(
+        (
+            mutator.mutate_sequencer_note,
+            mutator.mutate_sequencer_step,
+            mutator.mutate_sequencer_velocity,
+            mutator.mutate_sequencer_gate,
+            mutator.mutate_sequencer_timing,
+        )
+    )
 
 
 def validate_range(value: int, minimum: int, maximum: int, field: str, config_path: Path) -> int:
@@ -3035,7 +3099,7 @@ class RuntimeState:
         if target is None:
             raise ValueError(f"Unknown mutator target: {mutator.target}")
         before = self._capture_memory_slot_locked(target)
-        mutated = self._mutated_slot_state_locked(target, before, degree)
+        mutated = self._mutated_slot_state_locked(mutator, target, before, degree)
         self._mutator_undo_state[mutator.state_key] = before
         self._apply_slot_state_locked(mutated)
 
@@ -3067,7 +3131,7 @@ class RuntimeState:
         self._save_state_locked()
 
     def _mutated_slot_state_locked(
-        self, target: LayoutNode, slot: MemorySlotState, degree: float
+        self, mutator: MutatorConfig, target: LayoutNode, slot: MemorySlotState, degree: float
     ) -> MemorySlotState:
         numeric = dict(slot.numeric)
         sequencers = {
@@ -3083,11 +3147,12 @@ class RuntimeState:
             ]
             for key, steps in slot.sequencers.items()
         }
-        self._mutate_collected_state_locked(target, numeric, sequencers, degree)
+        self._mutate_collected_state_locked(mutator, target, numeric, sequencers, degree)
         return MemorySlotState(numeric=numeric, sequencers=sequencers)
 
     def _mutate_collected_state_locked(
         self,
+        mutator: MutatorConfig,
         node: LayoutNode,
         numeric: dict[str, float],
         sequencers: dict[str, list[SequencerStepState]],
@@ -3110,32 +3175,44 @@ class RuntimeState:
         if isinstance(node, SequencerConfig):
             steps = sequencers.get(node.state_key, [])
             sequencers[node.state_key] = [
-                self._mutated_sequencer_step(node, step, degree) for step in steps
+                self._mutated_sequencer_step(mutator, node, step, degree) for step in steps
             ]
             return
         if isinstance(node, (KeyboardConfig, ButtonConfig, MemoryConfig, MutatorConfig)):
             return
         if isinstance(node, TabsConfig):
             for tab in node.tabs:
-                self._mutate_collected_state_locked(tab.content, numeric, sequencers, degree)
+                self._mutate_collected_state_locked(mutator, tab.content, numeric, sequencers, degree)
             return
         for child in node.children:
-            self._mutate_collected_state_locked(child, numeric, sequencers, degree)
+            self._mutate_collected_state_locked(mutator, child, numeric, sequencers, degree)
 
     def _mutated_sequencer_step(
-        self, sequencer: SequencerConfig, step: SequencerStepState, degree: float
+        self, mutator: MutatorConfig, sequencer: SequencerConfig, step: SequencerStepState, degree: float
     ) -> SequencerStepState:
         value_target = random.randint(sequencer.minimum, sequencer.maximum)
         velocity_target = random.randint(1, 127)
         gate_target = random.uniform(0.01, sequencer.max_gate_steps)
         timing_target = random.uniform(-1.0, 1.0)
-        enabled = random.choice((True, False)) if random.random() < degree else step.enabled
+        enabled = (
+            random.choice((True, False))
+            if mutator.mutate_sequencer_step and random.random() < degree
+            else step.enabled
+        )
         return SequencerStepState(
             enabled=enabled,
-            value=round(step.value + ((value_target - step.value) * degree)),
-            velocity=round(step.velocity + ((velocity_target - step.velocity) * degree)),
-            gate=step.gate + ((gate_target - step.gate) * degree),
-            timing=step.timing + ((timing_target - step.timing) * degree),
+            value=round(step.value + ((value_target - step.value) * degree))
+            if mutator.mutate_sequencer_note
+            else step.value,
+            velocity=round(step.velocity + ((velocity_target - step.velocity) * degree))
+            if mutator.mutate_sequencer_velocity
+            else step.velocity,
+            gate=step.gate + ((gate_target - step.gate) * degree)
+            if mutator.mutate_sequencer_gate
+            else step.gate,
+            timing=step.timing + ((timing_target - step.timing) * degree)
+            if mutator.mutate_sequencer_timing
+            else step.timing,
         )
 
     def _start_slider_transition_locked(

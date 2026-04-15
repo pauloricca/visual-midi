@@ -699,6 +699,21 @@
               "type": "number",
               "minimum": 0,
               "maximum": 1
+            },
+            "note": {
+              "type": "boolean"
+            },
+            "step": {
+              "type": "boolean"
+            },
+            "velocity": {
+              "type": "boolean"
+            },
+            "gate": {
+              "type": "boolean"
+            },
+            "timing": {
+              "type": "boolean"
             }
           }
         }

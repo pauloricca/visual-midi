@@ -1,6 +1,7 @@
 import { postMutatorAction } from "../api.js";
 import { refreshFromPayload } from "../app.js";
 import { applyNodeSizing } from "../utils/layout.js";
+import { createButton } from "../ui/button.js";
 import { createSlider } from "../ui/slider.js";
 
 export function renderMutator(node) {
@@ -31,24 +32,26 @@ export function renderMutator(node) {
   const actions = document.createElement("div");
   actions.className = "mutator-actions";
 
-  const mutateButton = document.createElement("button");
-  mutateButton.type = "button";
-  mutateButton.className = "mutator-button";
-  mutateButton.textContent = "Mutate";
-  mutateButton.addEventListener("click", () => {
-    void applyMutatorAction(state, degree, "mutate", undoButton);
+  const mutateButton = createButton({
+    className: "mutator-button",
+    text: "Mutate",
+    color: node.color || "#d26a2e",
+    onClick: () => {
+      void applyMutatorAction(state, degree, "mutate", undoButton);
+    },
   });
 
-  const undoButton = document.createElement("button");
-  undoButton.type = "button";
-  undoButton.className = "mutator-button";
-  undoButton.textContent = "Undo";
-  undoButton.disabled = !node.canUndo;
-  undoButton.addEventListener("click", () => {
-    void applyMutatorAction(state, degree, "undo", undoButton);
+  const undoButton = createButton({
+    className: "mutator-button",
+    text: "Undo",
+    color: node.color || "#d26a2e",
+    disabled: !node.canUndo,
+    onClick: () => {
+      void applyMutatorAction(state, degree, "undo", undoButton);
+    },
   });
 
-  actions.append(mutateButton, undoButton);
+  actions.append(mutateButton.element, undoButton.element);
   wrapper.append(degree.element, actions);
   return wrapper;
 }
@@ -66,7 +69,7 @@ async function applyMutatorAction(state, degree, action, undoButton) {
     }
     const payload = await response.json();
     refreshFromPayload(payload);
-    undoButton.disabled = action === "undo";
+    undoButton.setDisabled(action === "undo");
   } catch (_error) {
   } finally {
     state.pending = false;

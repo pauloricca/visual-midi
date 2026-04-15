@@ -212,6 +212,11 @@ Supported mutator fields:
 - `type: mutator`
 - `target`: required name of a control or named container subtree to mutate
 - `default`: optional initial mutation amount from `0` to `1`, defaults to `0.5`
+- `note`: optional boolean for sequencer step note/value mutation, defaults to `true`
+- `step`: optional boolean for sequencer step enable/disable mutation, defaults to `true`
+- `velocity`: optional boolean for sequencer velocity mutation, defaults to `true`
+- `gate`: optional boolean for sequencer gate mutation, defaults to `true`
+- `timing`: optional boolean for sequencer micro-timing mutation, defaults to `true`
 - the top half is an unlabeled horizontal slider where `0` leaves values unchanged and `1` randomizes values across the target controls' ranges
 - the bottom half has `Mutate` and `Undo` buttons
 - `Mutate` stores the previous target state for that mutator, then changes slider/LFO, tempo, and sequencer values according to the current amount
