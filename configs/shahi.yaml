@@ -1,4 +1,5 @@
 output: IAC Driver Bus 1
+bpm: 130
 osc:
   host: 127.0.0.1
   port: 9000
@@ -14,16 +15,27 @@ quantize_speed: true
 columns:
   - name: amp
     control: 3
-  - name: hp cuttoff
+  - name: hp cutoff
     control: 19
+    curve: 2
+    osc:
+      path: hp_cutoff
+      min: 0
+      max: 20000
   - name: hp peak
     control: 20
-  - name: lp cuttoff
+  - name: lp cutoff
     control: 17
+    curve: 1.5
+    osc:
+      path: lp_cutoff
+      min: 0
+      max: 20000
   - name: lp peak
     control: 18
   - name: distortion
     control: 16
+    curve: 2
   - name: saw freq
     control: 0
   - name: saw range min

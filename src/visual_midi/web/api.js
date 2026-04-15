@@ -60,6 +60,14 @@ export async function postMemoryAction(key, slot, action) {
   });
 }
 
+export async function postMutatorAction(key, degree, action) {
+  return fetch(apiUrl("/api/mutator"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key, degree, action }),
+  });
+}
+
 export async function postTransportState(playing) {
   return fetch("/api/transport", {
     method: "POST",

@@ -7,6 +7,7 @@ import io
 import json
 import math
 import mimetypes
+import random
 import re
 import socket
 import time
@@ -74,6 +75,7 @@ class LayoutDefaults:
     maximum: int = 127
     steps: int | None = None
     speed: float = 1.0
+    curve: float = 0.0
     quantize_speed_to_tempo_divisions: bool = False
     orientation: str = "vertical"
     color: str = "#d26a2e"
@@ -97,6 +99,7 @@ class SliderConfig:
     maximum: int = 127
     steps: int | None = None
     speed: float = 1.0
+    curve: float = 0.0
     orientation: str = "vertical"
     color: str = "#d26a2e"
     show_label: bool = True
@@ -237,6 +240,21 @@ class MemoryConfig:
         return f"memory:{self.name}"
 
 
+@dataclass(frozen=True)
+class MutatorConfig:
+    name: str
+    target: str
+    default: float = 0.5
+    color: str = "#d26a2e"
+    show_label: bool = True
+    width: SizeSpec | None = None
+    height: SizeSpec | None = None
+
+    @property
+    def state_key(self) -> str:
+        return f"mutator:{self.name}"
+
+
 ControlConfig = Union[
     SliderConfig,
     KeyboardConfig,
@@ -244,6 +262,7 @@ ControlConfig = Union[
     TempoConfig,
     SequencerConfig,
     MemoryConfig,
+    MutatorConfig,
 ]
 LayoutNode = Union[
     SliderConfig,
@@ -252,6 +271,7 @@ LayoutNode = Union[
     TempoConfig,
     SequencerConfig,
     MemoryConfig,
+    MutatorConfig,
     GroupConfig,
     TabsConfig,
 ]
@@ -261,12 +281,14 @@ LayoutNode = Union[
 class AppConfig:
     title: str | None
     output: str
+    bpm: float
     inertia: float
     layout: LayoutNode
     sliders: list[SliderConfig]
     tempo: TempoConfig | None = None
     sequencers: list[SequencerConfig] | None = None
     memories: list[MemoryConfig] | None = None
+    mutators: list[MutatorConfig] | None = None
     osc: "OscOutputConfig | None" = None
 
 
@@ -421,6 +443,10 @@ def build_web_server(*, runtime: "RuntimeState") -> ThreadingHTTPServer:
 
             if parsed.path == "/api/memory":
                 self.handle_memory_post()
+                return
+
+            if parsed.path == "/api/mutator":
+                self.handle_mutator_post()
                 return
 
             if parsed.path == "/api/transport":
@@ -587,6 +613,32 @@ def build_web_server(*, runtime: "RuntimeState") -> ThreadingHTTPServer:
             self.end_headers()
             self.wfile.write(payload)
 
+        def handle_mutator_post(self) -> None:
+            parsed = urlparse(self.path)
+            content_length = int(self.headers.get("Content-Length", "0"))
+            raw = self.rfile.read(content_length)
+            try:
+                body = json.loads(raw.decode("utf-8"))
+                state_key = str(body["key"])
+                action = str(body["action"])
+                degree = float(body.get("degree", 0.0))
+                runtime.apply_mutator(state_key=state_key, degree=degree, action=action)
+            except (json.JSONDecodeError, KeyError, TypeError, ValueError, SystemExit) as exc:
+                self.send_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+
+            payload = json.dumps(
+                runtime.frontend_payload(
+                    hide_qr_panel="noqr" in parse_qs(parsed.query, keep_blank_values=True),
+                    port=self.server.server_address[1],
+                )
+            ).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
         def serve_static_file(self, relative_path: str) -> None:
             file_path = (STATIC_DIR / relative_path).resolve()
             if not str(file_path).startswith(str(STATIC_DIR.resolve())) or not file_path.exists():
@@ -651,34 +703,37 @@ def load_config(config_path: Path) -> AppConfig:
     else:
         raise SystemExit(f"Config {config_path} title must be a string if provided")
     output = parse_output_name(raw.get("output"), config_path=config_path, path="output")
+    bpm = parse_root_bpm(raw.get("bpm", 120.0), config_path=config_path, path="bpm")
     inertia = parse_inertia(raw.get("inertia", 1.0), config_path=config_path, path="inertia")
     osc = parse_osc_output(raw.get("osc"), config_path=config_path)
 
     palette = parse_palette(raw.get("palette"), config_path=config_path)
-    layout = parse_root_layout(raw=raw, config_path=config_path, palette=palette)
+    layout = parse_root_layout(raw=raw, config_path=config_path, palette=palette, root_bpm=bpm)
     sliders = collect_sliders(layout)
     tempo = collect_tempo(layout)
     sequencers = collect_sequencers(layout)
     memories = collect_memories(layout)
+    mutators = collect_mutators(layout)
     if count_controls(layout) == 0:
         raise SystemExit(f"Config {config_path} must contain at least one control")
     if layout_has_osc_routes(layout) and osc is None:
         raise SystemExit(
             f"Config {config_path} defines control osc routes but is missing the root 'osc' output"
         )
-    if sequencers and tempo is None:
-        raise SystemExit(f"Config {config_path} defines sequencers and requires a tempo control")
     validate_memory_targets(layout, memories, config_path=config_path)
+    validate_mutator_targets(layout, mutators, config_path=config_path)
 
     return AppConfig(
         title=title,
         output=output.strip(),
+        bpm=bpm,
         inertia=inertia,
         layout=layout,
         sliders=sliders,
         tempo=tempo,
         sequencers=sequencers,
         memories=memories,
+        mutators=mutators,
         osc=osc,
     )
 
@@ -721,7 +776,7 @@ def parse_osc_output(raw: Any, *, config_path: Path) -> OscOutputConfig | None:
 
 
 def parse_root_layout(
-    *, raw: dict[str, Any], config_path: Path, palette: dict[str, str]
+    *, raw: dict[str, Any], config_path: Path, palette: dict[str, str], root_bpm: float
 ) -> LayoutNode:
     container_keys = [key for key in ("rows", "columns", "tabs") if key in raw]
     if len(container_keys) != 1:
@@ -735,6 +790,7 @@ def parse_root_layout(
         path=container_keys[0],
         raw=raw,
         palette=palette,
+        root_bpm=root_bpm,
         defaults=parse_layout_defaults(
             raw,
             inherited=LayoutDefaults(
@@ -755,6 +811,7 @@ def parse_container(
     path: str,
     raw: dict[str, Any],
     palette: dict[str, str],
+    root_bpm: float,
     defaults: LayoutDefaults,
 ) -> LayoutNode:
     if key == "tabs":
@@ -764,6 +821,7 @@ def parse_container(
             path=path,
             raw=raw,
             palette=palette,
+            root_bpm=root_bpm,
             defaults=defaults,
         )
     return parse_group(
@@ -773,6 +831,7 @@ def parse_container(
         path=path,
         raw=raw,
         palette=palette,
+        root_bpm=root_bpm,
         defaults=defaults,
     )
 
@@ -785,6 +844,7 @@ def parse_group(
     path: str,
     raw: dict[str, Any],
     palette: dict[str, str],
+    root_bpm: float,
     defaults: LayoutDefaults,
 ) -> GroupConfig:
     if not isinstance(children_raw, list) or not children_raw:
@@ -819,6 +879,7 @@ def parse_group(
                     path=f"{child_path}.{child_key}",
                     raw=item,
                     palette=palette,
+                    root_bpm=root_bpm,
                     defaults=child_defaults,
                 )
             )
@@ -829,6 +890,7 @@ def parse_group(
                     config_path=config_path,
                     path=child_path,
                     palette=palette,
+                    root_bpm=root_bpm,
                     defaults=defaults,
                 )
             )
@@ -849,6 +911,7 @@ def parse_tabs(
     path: str,
     raw: dict[str, Any],
     palette: dict[str, str],
+    root_bpm: float,
     defaults: LayoutDefaults,
 ) -> TabsConfig:
     if not isinstance(tabs_raw, list) or not tabs_raw:
@@ -867,6 +930,7 @@ def parse_tabs(
                 config_path=config_path,
                 path=f"{tab_path}.tab",
                 palette=palette,
+                root_bpm=root_bpm,
                 defaults=defaults,
             )
         )
@@ -885,6 +949,7 @@ def parse_tab(
     config_path: Path,
     path: str,
     palette: dict[str, str],
+    root_bpm: float,
     defaults: LayoutDefaults,
 ) -> TabConfig:
     if not isinstance(raw, dict):
@@ -913,6 +978,7 @@ def parse_tab(
             path=f"{path}.{key}",
             raw=raw,
             palette=palette,
+            root_bpm=root_bpm,
             defaults=tab_defaults,
         ),
     )
@@ -924,6 +990,7 @@ def parse_control(
     config_path: Path,
     path: str,
     palette: dict[str, str],
+    root_bpm: float,
     defaults: LayoutDefaults,
 ) -> ControlConfig:
     control_type = str(raw.get("type", "slider")).strip() or "slider"
@@ -958,6 +1025,7 @@ def parse_control(
             config_path=config_path,
             path=path,
             palette=palette,
+            root_bpm=root_bpm,
             defaults=defaults,
         )
     if control_type == "sequencer":
@@ -976,8 +1044,16 @@ def parse_control(
             palette=palette,
             defaults=defaults,
         )
+    if control_type == "mutator":
+        return parse_mutator(
+            raw,
+            config_path=config_path,
+            path=path,
+            palette=palette,
+            defaults=defaults,
+        )
     raise SystemExit(
-        f"{config_path} {path}.type must be 'slider', 'lfo', 'keyboard', 'button', 'tempo', 'sequencer', or 'memory'"
+        f"{config_path} {path}.type must be 'slider', 'lfo', 'keyboard', 'button', 'tempo', 'sequencer', 'memory', or 'mutator'"
     )
 
 
@@ -1045,6 +1121,9 @@ def parse_slider(
             ),
             speed=parse_speed(
                 raw.get("speed", defaults.speed), config_path=config_path, path=f"{path}.speed"
+            ),
+            curve=parse_curve(
+                raw.get("curve", defaults.curve), config_path=config_path, path=f"{path}.curve"
             ),
             orientation=str(raw.get("orientation", defaults.orientation)),
             color=resolve_color(
@@ -1168,6 +1247,7 @@ def parse_tempo(
     config_path: Path,
     path: str,
     palette: dict[str, str],
+    root_bpm: float,
     defaults: LayoutDefaults,
 ) -> TempoConfig:
     try:
@@ -1178,7 +1258,7 @@ def parse_tempo(
                 config_path=config_path,
                 path=f"{path}.output",
             ),
-            default=parse_numeric_value(raw.get("default", 120.0), config_path=config_path, path=f"{path}.default"),
+            default=parse_numeric_value(raw.get("default", root_bpm), config_path=config_path, path=f"{path}.default"),
             minimum=parse_numeric_value(raw.get("min", 20.0), config_path=config_path, path=f"{path}.min"),
             maximum=parse_numeric_value(raw.get("max", 300.0), config_path=config_path, path=f"{path}.max"),
             color=resolve_color(
@@ -1391,6 +1471,43 @@ def parse_memory(
         raise SystemExit(f"{config_path} {path} is missing '{missing}'") from exc
 
 
+def parse_mutator(
+    raw: dict[str, Any],
+    *,
+    config_path: Path,
+    path: str,
+    palette: dict[str, str],
+    defaults: LayoutDefaults,
+) -> MutatorConfig:
+    try:
+        target = parse_optional_name(raw["target"], config_path=config_path, path=f"{path}.target")
+        if target is None:
+            raise SystemExit(f"{config_path} {path}.target must be a non-empty string")
+        return MutatorConfig(
+            name=str(raw["name"]),
+            target=target,
+            default=parse_unit_interval(
+                raw.get("default", 0.5), config_path=config_path, path=f"{path}.default"
+            ),
+            color=resolve_color(
+                raw.get("color", defaults.color),
+                palette=palette,
+                config_path=config_path,
+                path=f"{path}.color",
+            ),
+            show_label=parse_boolean(
+                raw.get("show_label", defaults.show_label),
+                config_path=config_path,
+                path=f"{path}.show_label",
+            ),
+            width=parse_size(raw.get("width"), config_path=config_path, path=f"{path}.width"),
+            height=parse_size(raw.get("height"), config_path=config_path, path=f"{path}.height"),
+        )
+    except KeyError as exc:
+        missing = exc.args[0]
+        raise SystemExit(f"{config_path} {path} is missing '{missing}'") from exc
+
+
 def parse_layout_defaults(
     raw: dict[str, Any],
     *,
@@ -1427,6 +1544,10 @@ def parse_layout_defaults(
     if "speed" in raw:
         speed = parse_speed(raw["speed"], config_path=config_path, path=f"{path}.speed")
 
+    curve = inherited.curve
+    if "curve" in raw:
+        curve = parse_curve(raw["curve"], config_path=config_path, path=f"{path}.curve")
+
     quantize_speed_to_tempo_divisions = inherited.quantize_speed_to_tempo_divisions
     if "quantize_speed" in raw:
         quantize_speed_to_tempo_divisions = parse_boolean(
@@ -1457,6 +1578,7 @@ def parse_layout_defaults(
         maximum=maximum,
         steps=steps,
         speed=speed,
+        curve=curve,
         quantize_speed_to_tempo_divisions=quantize_speed_to_tempo_divisions,
         orientation=orientation,
         color=color,
@@ -1507,6 +1629,24 @@ def parse_inertia(raw: Any, *, config_path: Path, path: str) -> float:
     return value
 
 
+def parse_unit_interval(raw: Any, *, config_path: Path, path: str) -> float:
+    if isinstance(raw, bool):
+        raise SystemExit(f"{config_path} {path} must be a number between 0 and 1")
+    value = parse_numeric_value(raw, config_path=config_path, path=path)
+    if not 0 <= value <= 1:
+        raise SystemExit(f"{config_path} {path} must be between 0 and 1")
+    return value
+
+
+def parse_root_bpm(raw: Any, *, config_path: Path, path: str) -> float:
+    if isinstance(raw, bool):
+        raise SystemExit(f"{config_path} {path} must be a number")
+    value = parse_numeric_value(raw, config_path=config_path, path=path)
+    if value <= 0:
+        raise SystemExit(f"{config_path} {path} must be greater than 0")
+    return round(value * 10.0) / 10.0
+
+
 def parse_speed(raw: Any, *, config_path: Path, path: str) -> float:
     try:
         value = float(raw)
@@ -1514,6 +1654,15 @@ def parse_speed(raw: Any, *, config_path: Path, path: str) -> float:
         raise SystemExit(f"{config_path} {path} must be a number") from exc
     if value <= 0:
         raise SystemExit(f"{config_path} {path} must be greater than 0")
+    return value
+
+
+def parse_curve(raw: Any, *, config_path: Path, path: str) -> float:
+    if isinstance(raw, bool):
+        raise SystemExit(f"{config_path} {path} must be a number")
+    value = parse_numeric_value(raw, config_path=config_path, path=path)
+    if not math.isfinite(value):
+        raise SystemExit(f"{config_path} {path} must be a finite number")
     return value
 
 
@@ -1696,7 +1845,7 @@ def parse_size(value: Any, *, config_path: Path, path: str) -> SizeSpec | None:
 def collect_sliders(node: LayoutNode) -> list[SliderConfig]:
     if isinstance(node, SliderConfig):
         return [node]
-    if isinstance(node, (KeyboardConfig, ButtonConfig, TempoConfig, SequencerConfig, MemoryConfig)):
+    if isinstance(node, (KeyboardConfig, ButtonConfig, TempoConfig, SequencerConfig, MemoryConfig, MutatorConfig)):
         return []
     if isinstance(node, TabsConfig):
         sliders: list[SliderConfig] = []
@@ -1713,7 +1862,7 @@ def collect_sliders(node: LayoutNode) -> list[SliderConfig]:
 def collect_buttons_by_key(node: LayoutNode) -> dict[str, ButtonConfig]:
     if isinstance(node, ButtonConfig):
         return {node.state_key: node}
-    if isinstance(node, (SliderConfig, KeyboardConfig, TempoConfig, SequencerConfig, MemoryConfig)):
+    if isinstance(node, (SliderConfig, KeyboardConfig, TempoConfig, SequencerConfig, MemoryConfig, MutatorConfig)):
         return {}
     if isinstance(node, TabsConfig):
         buttons: dict[str, ButtonConfig] = {}
@@ -1730,7 +1879,7 @@ def collect_buttons_by_key(node: LayoutNode) -> dict[str, ButtonConfig]:
 def find_keyboard_by_key(node: LayoutNode, state_key: str) -> KeyboardConfig | None:
     if isinstance(node, KeyboardConfig):
         return node if node.state_key == state_key else None
-    if isinstance(node, (SliderConfig, ButtonConfig, TempoConfig, SequencerConfig, MemoryConfig)):
+    if isinstance(node, (SliderConfig, ButtonConfig, TempoConfig, SequencerConfig, MemoryConfig, MutatorConfig)):
         return None
     if isinstance(node, TabsConfig):
         for tab in node.tabs:
@@ -1749,7 +1898,7 @@ def find_keyboard_by_key(node: LayoutNode, state_key: str) -> KeyboardConfig | N
 def collect_tempo(node: LayoutNode) -> TempoConfig | None:
     if isinstance(node, TempoConfig):
         return node
-    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, SequencerConfig, MemoryConfig)):
+    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, SequencerConfig, MemoryConfig, MutatorConfig)):
         return None
     if isinstance(node, TabsConfig):
         found: TempoConfig | None = None
@@ -1776,7 +1925,7 @@ def collect_tempo(node: LayoutNode) -> TempoConfig | None:
 def collect_sequencers(node: LayoutNode) -> list[SequencerConfig]:
     if isinstance(node, SequencerConfig):
         return [node]
-    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, TempoConfig, MemoryConfig)):
+    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, TempoConfig, MemoryConfig, MutatorConfig)):
         return []
     if isinstance(node, TabsConfig):
         sequencers: list[SequencerConfig] = []
@@ -1793,7 +1942,7 @@ def collect_sequencers(node: LayoutNode) -> list[SequencerConfig]:
 def collect_memories(node: LayoutNode) -> list[MemoryConfig]:
     if isinstance(node, MemoryConfig):
         return [node]
-    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, TempoConfig, SequencerConfig)):
+    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, TempoConfig, SequencerConfig, MutatorConfig)):
         return []
     if isinstance(node, TabsConfig):
         memories: list[MemoryConfig] = []
@@ -1807,6 +1956,23 @@ def collect_memories(node: LayoutNode) -> list[MemoryConfig]:
     return memories
 
 
+def collect_mutators(node: LayoutNode) -> list[MutatorConfig]:
+    if isinstance(node, MutatorConfig):
+        return [node]
+    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, TempoConfig, SequencerConfig, MemoryConfig)):
+        return []
+    if isinstance(node, TabsConfig):
+        mutators: list[MutatorConfig] = []
+        for tab in node.tabs:
+            mutators.extend(collect_mutators(tab.content))
+        return mutators
+
+    mutators: list[MutatorConfig] = []
+    for child in node.children:
+        mutators.extend(collect_mutators(child))
+    return mutators
+
+
 def collect_midi_output_names(config: AppConfig) -> set[str]:
     names = {config.output}
     collect_layout_midi_output_names(config.layout, names)
@@ -1817,7 +1983,7 @@ def collect_layout_midi_output_names(node: LayoutNode, names: set[str]) -> None:
     if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, TempoConfig, SequencerConfig)):
         names.add(node.output)
         return
-    if isinstance(node, MemoryConfig):
+    if isinstance(node, (MemoryConfig, MutatorConfig)):
         return
     if isinstance(node, TabsConfig):
         for tab in node.tabs:
@@ -1828,7 +1994,7 @@ def collect_layout_midi_output_names(node: LayoutNode, names: set[str]) -> None:
 
 
 def count_controls(node: LayoutNode) -> int:
-    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, TempoConfig, SequencerConfig, MemoryConfig)):
+    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, TempoConfig, SequencerConfig, MemoryConfig, MutatorConfig)):
         return 1
     if isinstance(node, TabsConfig):
         return sum(count_controls(tab.content) for tab in node.tabs)
@@ -1846,7 +2012,7 @@ def layout_has_osc_routes(node: LayoutNode) -> bool:
         return False
     if isinstance(node, SequencerConfig):
         return node.osc is not None
-    if isinstance(node, MemoryConfig):
+    if isinstance(node, (MemoryConfig, MutatorConfig)):
         return False
     if isinstance(node, TabsConfig):
         return any(layout_has_osc_routes(tab.content) for tab in node.tabs)
@@ -1868,6 +2034,21 @@ def validate_memory_targets(
             )
 
 
+def validate_mutator_targets(
+    layout: LayoutNode, mutators: list[MutatorConfig], *, config_path: Path
+) -> None:
+    for mutator in mutators:
+        target = resolve_memory_target(layout, mutator.target)
+        if target is None:
+            raise SystemExit(
+                f"{config_path} mutator '{mutator.name}' target '{mutator.target}' does not match any named control or container"
+            )
+        if not target_has_recallable_state(target):
+            raise SystemExit(
+                f"{config_path} mutator '{mutator.name}' target '{mutator.target}' has no mutable controls"
+            )
+
+
 def resolve_memory_target(node: LayoutNode, target: str) -> LayoutNode | None:
     matches: list[LayoutNode] = []
     collect_memory_target_matches(node, target.strip(), matches)
@@ -1879,7 +2060,7 @@ def resolve_memory_target(node: LayoutNode, target: str) -> LayoutNode | None:
 
 
 def collect_memory_target_matches(node: LayoutNode, target: str, matches: list[LayoutNode]) -> None:
-    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, TempoConfig, SequencerConfig, MemoryConfig)):
+    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, TempoConfig, SequencerConfig, MemoryConfig, MutatorConfig)):
         if getattr(node, "name", None) == target:
             matches.append(node)
         return
@@ -1898,7 +2079,7 @@ def collect_memory_target_matches(node: LayoutNode, target: str, matches: list[L
 def target_has_recallable_state(node: LayoutNode) -> bool:
     if isinstance(node, (SliderConfig, TempoConfig, SequencerConfig)):
         return True
-    if isinstance(node, (KeyboardConfig, ButtonConfig, MemoryConfig)):
+    if isinstance(node, (KeyboardConfig, ButtonConfig, MemoryConfig, MutatorConfig)):
         return False
     if isinstance(node, TabsConfig):
         return any(target_has_recallable_state(tab.content) for tab in node.tabs)
@@ -2249,6 +2430,12 @@ class RuntimeState:
         self._sequencers_by_key = {sequencer.state_key: sequencer for sequencer in self._sequencers}
         self._memories = config.memories or []
         self._memories_by_key = {memory.state_key: memory for memory in self._memories}
+        self._mutators = config.mutators or []
+        self._mutators_by_key = {mutator.state_key: mutator for mutator in self._mutators}
+        self._mutator_degrees = {
+            mutator.state_key: mutator.default for mutator in self._mutators
+        }
+        self._mutator_undo_state: dict[str, MemorySlotState] = {}
         self._transition_generation: dict[str, int] = {}
         self._sequencer_positions = {sequencer.state_key: -1 for sequencer in self._sequencers}
         self._sequencer_tick_progress = {sequencer.state_key: 0.0 for sequencer in self._sequencers}
@@ -2256,7 +2443,7 @@ class RuntimeState:
         self._active_sequencer_note_id = 0
         self._scheduled_sequencer_notes: list[ScheduledSequencerNote] = []
         self._tempo = config.tempo
-        self._tempo_bpm = 120.0
+        self._tempo_bpm = config.bpm
         if self._tempo is not None:
             self._tempo_bpm = quantize_tempo_value(
                 self._tempo,
@@ -2405,6 +2592,22 @@ class RuntimeState:
                 return
             raise ValueError(f"Unsupported memory action: {action}")
 
+    def apply_mutator(self, *, state_key: str, degree: float, action: str) -> None:
+        self.reload_if_needed()
+        with self.lock:
+            mutator = self._mutators_by_key.get(state_key)
+            if mutator is None:
+                raise ValueError(f"Unknown mutator key: {state_key}")
+            if action == "mutate":
+                self._mutator_degrees[mutator.state_key] = degree
+                self._mutate_target_locked(mutator, degree)
+                return
+            if action == "undo":
+                self._mutator_degrees[mutator.state_key] = degree
+                self._undo_mutator_locked(mutator)
+                return
+            raise ValueError(f"Unsupported mutator action: {action}")
+
     def frontend_payload(self, *, hide_qr_panel: bool, port: int) -> dict[str, Any]:
         self.reload_if_needed()
         config = self.current_config()
@@ -2447,7 +2650,6 @@ class RuntimeState:
 
         new_midi_outputs = None
         new_osc_client = None
-        should_stop_transport = False
         with self.lock:
             new_output_names = collect_midi_output_names(new_config)
             current_output_names = set(self._midi_outputs)
@@ -2490,6 +2692,17 @@ class RuntimeState:
             }
             self._memories = new_config.memories or []
             self._memories_by_key = {memory.state_key: memory for memory in self._memories}
+            self._mutators = new_config.mutators or []
+            self._mutators_by_key = {mutator.state_key: mutator for mutator in self._mutators}
+            self._mutator_degrees = {
+                mutator.state_key: self._mutator_degrees.get(mutator.state_key, mutator.default)
+                for mutator in self._mutators
+            }
+            self._mutator_undo_state = {
+                key: undo_state
+                for key, undo_state in self._mutator_undo_state.items()
+                if key in self._mutators_by_key
+            }
             self._transition_generation = {
                 key: generation
                 for key, generation in self._transition_generation.items()
@@ -2503,10 +2716,9 @@ class RuntimeState:
                     self._tempo,
                     self._state.get(self._tempo.state_key, self._tempo.default),
                 )
-                self._transport.set_bpm(self._tempo_bpm)
             else:
-                self._tempo_bpm = 120.0
-                should_stop_transport = True
+                self._tempo_bpm = new_config.bpm
+            self._transport.set_bpm(self._tempo_bpm)
             self._file_mtime_ns = current_mtime_ns
             self._version += 1
             self._last_reload_error = None
@@ -2519,9 +2731,6 @@ class RuntimeState:
 
         if new_midi_outputs is not None:
             close_midi_outputs(old_midi_outputs)
-        if should_stop_transport:
-            self._transport.stop()
-            self._handle_transport_stop()
         return True
 
     def _serialize_layout(self, node: LayoutNode) -> dict[str, Any]:
@@ -2543,6 +2752,7 @@ class RuntimeState:
                 "max": node.maximum,
                 "steps": node.steps,
                 "speed": normalize_numeric_value(node.speed),
+                "curve": normalize_numeric_value(node.curve),
                 "orientation": node.orientation,
                 "color": node.color,
                 "showLabel": node.show_label,
@@ -2632,6 +2842,21 @@ class RuntimeState:
                 "target": node.target,
                 "transition": normalize_numeric_value(node.transition),
                 "slots": [slot is not None for slot in slots[: node.slots]] + [False] * max(0, node.slots - len(slots)),
+                "color": node.color,
+                "showLabel": node.show_label,
+                "width": serialize_size(node.width),
+                "height": serialize_size(node.height),
+            }
+        if isinstance(node, MutatorConfig):
+            return {
+                "type": "mutator",
+                "key": node.state_key,
+                "name": node.name,
+                "target": node.target,
+                "value": normalize_numeric_value(
+                    self._mutator_degrees.get(node.state_key, node.default)
+                ),
+                "canUndo": node.state_key in self._mutator_undo_state,
                 "color": node.color,
                 "showLabel": node.show_label,
                 "width": serialize_size(node.width),
@@ -2803,6 +3028,116 @@ class RuntimeState:
         self._memory_state[memory.state_key] = slots
         self._save_state_locked()
 
+    def _mutate_target_locked(self, mutator: MutatorConfig, degree: float) -> None:
+        if not 0 <= degree <= 1:
+            raise ValueError("Mutator degree must be between 0 and 1")
+        target = resolve_memory_target(self._config.layout, mutator.target)
+        if target is None:
+            raise ValueError(f"Unknown mutator target: {mutator.target}")
+        before = self._capture_memory_slot_locked(target)
+        mutated = self._mutated_slot_state_locked(target, before, degree)
+        self._mutator_undo_state[mutator.state_key] = before
+        self._apply_slot_state_locked(mutated)
+
+    def _undo_mutator_locked(self, mutator: MutatorConfig) -> None:
+        previous = self._mutator_undo_state.get(mutator.state_key)
+        if previous is None:
+            return
+        self._apply_slot_state_locked(previous)
+        del self._mutator_undo_state[mutator.state_key]
+
+    def _apply_slot_state_locked(self, slot: MemorySlotState) -> None:
+        for key, value in slot.numeric.items():
+            slider = self._sliders_by_key.get(key)
+            if slider is not None:
+                self._update_slider_locked(slider, value, force_midi=True)
+                continue
+            if self._tempo is not None and key == self._tempo.state_key:
+                self._update_tempo_locked(value)
+        for key, steps in slot.sequencers.items():
+            sequencer = self._sequencers_by_key.get(key)
+            if sequencer is None:
+                continue
+            self._sequencer_state[key] = normalize_sequencer_steps(
+                sequencer,
+                steps,
+                config_path=self.config_path,
+                path=Path(key),
+            )
+        self._save_state_locked()
+
+    def _mutated_slot_state_locked(
+        self, target: LayoutNode, slot: MemorySlotState, degree: float
+    ) -> MemorySlotState:
+        numeric = dict(slot.numeric)
+        sequencers = {
+            key: [
+                SequencerStepState(
+                    enabled=step.enabled,
+                    value=step.value,
+                    velocity=step.velocity,
+                    gate=step.gate,
+                    timing=step.timing,
+                )
+                for step in steps
+            ]
+            for key, steps in slot.sequencers.items()
+        }
+        self._mutate_collected_state_locked(target, numeric, sequencers, degree)
+        return MemorySlotState(numeric=numeric, sequencers=sequencers)
+
+    def _mutate_collected_state_locked(
+        self,
+        node: LayoutNode,
+        numeric: dict[str, float],
+        sequencers: dict[str, list[SequencerStepState]],
+        degree: float,
+    ) -> None:
+        if isinstance(node, SliderConfig):
+            current = numeric.get(node.state_key, self._state.get(node.state_key, float(node.default)))
+            target = random.uniform(node.minimum, node.maximum)
+            numeric[node.state_key] = quantize_slider_value(
+                node, current + ((target - current) * degree)
+            )
+            return
+        if isinstance(node, TempoConfig):
+            current = numeric.get(node.state_key, self._tempo_bpm)
+            target = random.uniform(node.minimum, node.maximum)
+            numeric[node.state_key] = quantize_tempo_value(
+                node, current + ((target - current) * degree)
+            )
+            return
+        if isinstance(node, SequencerConfig):
+            steps = sequencers.get(node.state_key, [])
+            sequencers[node.state_key] = [
+                self._mutated_sequencer_step(node, step, degree) for step in steps
+            ]
+            return
+        if isinstance(node, (KeyboardConfig, ButtonConfig, MemoryConfig, MutatorConfig)):
+            return
+        if isinstance(node, TabsConfig):
+            for tab in node.tabs:
+                self._mutate_collected_state_locked(tab.content, numeric, sequencers, degree)
+            return
+        for child in node.children:
+            self._mutate_collected_state_locked(child, numeric, sequencers, degree)
+
+    def _mutated_sequencer_step(
+        self, sequencer: SequencerConfig, step: SequencerStepState, degree: float
+    ) -> SequencerStepState:
+        value_target = random.randint(sequencer.minimum, sequencer.maximum)
+        velocity_target = random.randint(1, 127)
+        gate_target = random.uniform(0.01, sequencer.max_gate_steps)
+        timing_target = random.uniform(-1.0, 1.0)
+        enabled = random.choice((True, False)) if random.random() < degree else step.enabled
+        return SequencerStepState(
+            enabled=enabled,
+            value=round(step.value + ((value_target - step.value) * degree)),
+            velocity=round(step.velocity + ((velocity_target - step.velocity) * degree)),
+            gate=step.gate + ((gate_target - step.gate) * degree),
+            timing=step.timing + ((timing_target - step.timing) * degree),
+        )
+
     def _start_slider_transition_locked(
         self,
         transitions: list[tuple[SliderConfig, float, float, int]],
@@ -2861,7 +3196,7 @@ class RuntimeState:
                 for step in self._sequencer_state.get(node.state_key, [])
             ]
             return
-        if isinstance(node, (KeyboardConfig, ButtonConfig, MemoryConfig)):
+        if isinstance(node, (KeyboardConfig, ButtonConfig, MemoryConfig, MutatorConfig)):
             return
         if isinstance(node, TabsConfig):
             for tab in node.tabs:

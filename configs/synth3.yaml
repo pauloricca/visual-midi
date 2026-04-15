@@ -1,0 +1,97 @@
+output: IAC Driver Bus 1
+bpm: 130
+osc:
+  host: 127.0.0.1
+  port: 9000
+palette:
+  orange: "#d26a2e"
+  moss: "#5f8f6b"
+  clay: "#b85d45"
+  slate: "#5077b5"
+  sand: "#c8a76a"
+  plum: "#8a5a7c"
+  teal: "#4f8f88"
+quantize_speed: true
+columns:
+  - name: base freq
+    control: 15
+  - rows:
+      - name: amp 1
+        control: 0
+      - name: freq 1
+        control: 16
+        curve: 2
+        osc:
+          path: freq1
+          min: 0
+          max: 2000
+  - rows:
+      - name: amp 2
+        control: 1
+      - name: freq 2
+        control: 17
+        curve: 2
+        osc:
+          path: freq2
+          min: 0
+          max: 2000
+  - rows:
+      - name: amp 3
+        control: 2
+      - name: freq 3
+        control: 18
+        curve: 2
+        osc:
+          path: freq3
+          min: 0
+          max: 2000
+  - rows:
+      - name: amp 4
+        control: 3
+      - name: freq 4
+        control: 19
+        curve: 2
+        osc:
+          path: freq4
+          min: 0
+          max: 2000
+  - rows:
+      - name: amp 5
+        control: 4
+      - name: freq 5
+        control: 20
+        curve: 2
+        osc:
+          path: freq5
+          min: 0
+          max: 2000
+  - rows:
+      - name: amp 6
+        control: 5
+      - name: freq 6
+        control: 21
+        curve: 2
+        osc:
+          path: freq6
+          min: 0
+          max: 2000
+  - rows:
+      - name: amp 7
+        control: 6
+      - name: freq 7
+        control: 22
+        curve: 2
+        osc:
+          path: freq7
+          min: 0
+          max: 2000
+  - rows:
+      - name: amp 8
+        control: 7
+      - name: freq 8
+        control: 23
+        curve: 2
+        osc:
+          path: freq8
+          min: 0
+          max: 2000

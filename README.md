@@ -41,6 +41,7 @@ rows:
 ```yaml
 title: Demo Controller
 output: IAC Driver Bus 1
+bpm: 120
 inertia: 1.2
 osc:
   host: 127.0.0.1
@@ -103,7 +104,7 @@ The layout fills the available UI area as a mosaic:
 
 Supported control fields:
 
-- `type`: optional, `slider`, `lfo`, `keyboard`, `button`, `tempo`, `sequencer`, or `memory`, defaults to `slider`; `lfo` is kept as a compatibility alias for a slider that opens in the LFO controls
+- `type`: optional, `slider`, `lfo`, `keyboard`, `button`, `tempo`, `sequencer`, `memory`, or `mutator`, defaults to `slider`; `lfo` is kept as a compatibility alias for a slider that opens in the LFO controls
 - `name`
 - `color`: any CSS color string or a name from the root `palette`, optional when inherited from a parent container
 - `show_label`: optional boolean, defaults to `true`; set `false` to hide the control title and MIDI/OSC metadata, may be inherited from a parent container
@@ -119,6 +120,7 @@ Supported slider fields:
 - `default`, `min`, `max`: optional, may be inherited from a parent container
 - `steps`: optional integer `>= 2` that snaps the slider to a fixed number of positions between `min` and `max`, inclusive, may be inherited from a parent container
 - `speed`: optional positive number, where `1` keeps the current feel, smaller values move faster, and larger values require more drag/scroll movement for smaller value changes, may be inherited from a parent container
+- `curve`: optional number, defaults to `0`; `0` maps slider position linearly to the sent value, positive values bunch sent values toward the high end of the visual slider, and negative values bunch them toward the low end, may be inherited from a parent container
 - `orientation`: `horizontal` or `vertical`, may be inherited from a parent container
 - `osc`: optional per-slider OSC mapping
 - `osc.path`: OSC address to send when the slider changes
@@ -164,12 +166,12 @@ Supported tempo fields:
 
 - `type: tempo`
 - only one tempo control is currently supported per config
-- `default`: optional BPM, defaults to `120.0`
+- `default`: optional BPM, defaults to the root `bpm`
 - `min`, `max`: optional BPM range, defaults to `20.0` and `300.0`
 - tempo values are quantized to `0.1` BPM
 - play sends MIDI real-time `start`, stop sends MIDI real-time `stop`
 - while playing, the backend emits MIDI real-time `clock` at `24 PPQN` using the configured BPM
-- the same BPM also updates the app's global transport/timing state for future sequencer features
+- the same BPM also updates the app's global transport/timing state
 
 Supported sequencer fields:
 
@@ -189,7 +191,7 @@ Supported sequencer fields:
 - `max_gate_steps`: optional number `>= 1` for `notes`; maximum gate value in steps, default `1`
 - `control`: optional for `cc`; required unless an `osc` route is present
 - `osc`: optional for `cc`; if present, the step value is mapped through `osc.min`/`osc.max` like a slider
-- sequencers require a tempo control somewhere in the same config
+- sequencers use the app's global transport BPM, which comes from the tempo control when present or the root `bpm` otherwise
 - note sequencers send one note per active step and release it after its gate length or when transport stops
 - cc sequencers emit their step value on each active step and skip disabled steps
 
@@ -205,13 +207,23 @@ Supported memory fields:
 - memory snapshots persist in the same state file as sliders, tempo, and sequencers
 - if the target subtree contains the memory control itself, the memory control is ignored and does not snapshot its own slots
 
+Supported mutator fields:
+
+- `type: mutator`
+- `target`: required name of a control or named container subtree to mutate
+- `default`: optional initial mutation amount from `0` to `1`, defaults to `0.5`
+- the top half is an unlabeled horizontal slider where `0` leaves values unchanged and `1` randomizes values across the target controls' ranges
+- the bottom half has `Mutate` and `Undo` buttons
+- `Mutate` stores the previous target state for that mutator, then changes slider/LFO, tempo, and sequencer values according to the current amount
+- `Undo` restores the target state from the last mutation made by that mutator
+
 Supported layout group fields:
 
 - `rows`
 - `columns`
 - `tabs`
-- `name`: optional unique name so a `memory.target` can point at the whole container subtree
-- `channel`, `default`, `min`, `max`, `steps`, `speed`, `orientation`, `color`: optional inherited defaults for descendant sliders and sequencers where relevant
+- `name`: optional unique name so a `memory.target` or `mutator.target` can point at the whole container subtree
+- `channel`, `default`, `min`, `max`, `steps`, `speed`, `curve`, `orientation`, `color`: optional inherited defaults for descendant sliders and sequencers where relevant
 - `width`, `height`: optional `%` or `px` sizes for the container tile
 
 Supported tab item fields:
@@ -222,6 +234,7 @@ Supported tab item fields:
 
 Optional root fields:
 
+- `bpm`: global transport BPM, defaults to `120.0`; used when no tempo control exists and as the default for tempo controls that omit `default`
 - `inertia`: global multiplier for release throw, where `1.0` is the default feel and `0` disables inertia
 - `osc.host`, `osc.port`: optional UDP destination used by slider `osc` routes
 - `palette`: a mapping of color names to CSS color strings

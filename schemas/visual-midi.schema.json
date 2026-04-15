@@ -25,6 +25,10 @@
       "$ref": "#/definitions/nonEmptyString",
       "description": "MIDI output device name."
     },
+    "bpm": {
+      "$ref": "#/definitions/positiveNumber",
+      "description": "Default global transport BPM. Used when no tempo control exists, and as the default for tempo controls that omit default."
+    },
     "inertia": {
       "$ref": "#/definitions/nonNegativeNumber",
       "description": "Global release throw multiplier. Use 0 to disable inertia."
@@ -61,6 +65,9 @@
     },
     "speed": {
       "$ref": "#/definitions/positiveNumber"
+    },
+    "curve": {
+      "$ref": "#/definitions/finiteNumber"
     },
     "quantize_speed": {
       "type": "boolean"
@@ -133,6 +140,9 @@
     "steps": {
       "type": "integer",
       "minimum": 2
+    },
+    "finiteNumber": {
+      "type": "number"
     },
     "orientation": {
       "type": "string",
@@ -233,7 +243,8 @@
         { "$ref": "#/definitions/buttonControl" },
         { "$ref": "#/definitions/tempoControl" },
         { "$ref": "#/definitions/sequencerControl" },
-        { "$ref": "#/definitions/memoryControl" }
+        { "$ref": "#/definitions/memoryControl" },
+        { "$ref": "#/definitions/mutatorControl" }
       ]
     },
     "containerBase": {
@@ -262,6 +273,9 @@
         },
         "speed": {
           "$ref": "#/definitions/positiveNumber"
+        },
+        "curve": {
+          "$ref": "#/definitions/finiteNumber"
         },
         "quantize_speed": {
           "type": "boolean"
@@ -423,6 +437,9 @@
         },
         "speed": {
           "$ref": "#/definitions/positiveNumber"
+        },
+        "curve": {
+          "$ref": "#/definitions/finiteNumber"
         },
         "orientation": {
           "$ref": "#/definitions/orientation"
@@ -660,6 +677,28 @@
             },
             "transition": {
               "$ref": "#/definitions/nonNegativeNumber"
+            }
+          }
+        }
+      ]
+    },
+    "mutatorControl": {
+      "allOf": [
+        { "$ref": "#/definitions/controlBase" },
+        {
+          "type": "object",
+          "required": ["type", "target"],
+          "properties": {
+            "type": {
+              "const": "mutator"
+            },
+            "target": {
+              "$ref": "#/definitions/nonEmptyString"
+            },
+            "default": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
             }
           }
         }

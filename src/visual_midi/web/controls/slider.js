@@ -7,6 +7,8 @@ import {
   computeWheelValueDelta,
   normalizeWheelDelta,
   quantizeSliderValue,
+  sliderRatioToValue,
+  sliderValueToRatio,
 } from "../utils/math.js";
 import { applyNodeSizing } from "../utils/layout.js";
 
@@ -114,10 +116,7 @@ export function renderSlider(node) {
       if (valueDelta === 0) {
         return;
       }
-      const nextValue = quantizeSliderValue(
-        state,
-        clamp(state.value + valueDelta, state.min, state.max)
-      );
+      const nextValue = quantizeSliderValue(state, wheelDeltaToSliderValue(state, valueDelta));
       if (nextValue === state.value) {
         return;
       }
@@ -140,7 +139,7 @@ export function queueSliderUpdate(state, value) {
 
 export function updateSliderVisuals(state, value) {
   state.value = value;
-  const percentage = ((value - state.min) / (state.max - state.min || 1)) * 100;
+  const percentage = sliderValueToRatio(state, value) * 100;
   if (state.title) {
     state.title.textContent = state.name;
   }
@@ -201,7 +200,8 @@ function updateFromPointer(state, event, now) {
     state.orientation === "vertical"
       ? -((event.clientY - state.dragStartY) / (rect.height || 1))
       : (event.clientX - state.dragStartX) / (rect.width || 1);
-  const rawValue = state.dragStartValue + travel * (state.max - state.min) * speed;
+  const rawRatio = sliderValueToRatio(state, state.dragStartValue) + travel * speed;
+  const rawValue = sliderRatioToValue(state, rawRatio);
   const boundedValue = quantizeSliderValue(state, clamp(rawValue, state.min, state.max));
   if (boundedValue === state.value) {
     updateVelocity(state, event, now, rect);
@@ -211,6 +211,17 @@ function updateFromPointer(state, event, now) {
   updateSliderVisuals(state, boundedValue);
   queueSliderUpdate(state, boundedValue);
   updateVelocity(state, event, now, rect);
+}
+
+function wheelDeltaToSliderValue(state, valueDelta) {
+  if (state.max === state.min) {
+    return state.min;
+  }
+  if (state.steps) {
+    return clamp(state.value + valueDelta, state.min, state.max);
+  }
+  const ratioDelta = valueDelta / (state.max - state.min);
+  return sliderRatioToValue(state, sliderValueToRatio(state, state.value) + ratioDelta);
 }
 
 function updateVelocity(state, event, now, rect) {

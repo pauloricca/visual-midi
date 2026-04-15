@@ -1,0 +1,23 @@
+output: IAC Driver Bus 1
+bpm: 130
+osc:
+  host: 127.0.0.1
+  port: 9000
+palette:
+  orange: "#d26a2e"
+  moss: "#5f8f6b"
+  clay: "#b85d45"
+  slate: "#5077b5"
+  sand: "#c8a76a"
+  plum: "#8a5a7c"
+  teal: "#4f8f88"
+quantize_speed: true
+columns:
+  - name: amp
+    control: 2
+  - name: freq base
+    control: 16
+  - name: fm
+    control: 17
+  - name: freq
+    control: 18

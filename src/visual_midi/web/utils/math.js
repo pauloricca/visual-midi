@@ -22,6 +22,51 @@ export function quantizeSliderValue(state, value) {
   return clamp(state.min + stepIndex * stepSize, state.min, state.max);
 }
 
+export function sliderValueToRatio(state, value) {
+  if (state.max === state.min) {
+    return 0;
+  }
+  const valueRatio = clamp((value - state.min) / (state.max - state.min), 0, 1);
+  return invertCurveRatio(valueRatio, state.curve);
+}
+
+export function sliderRatioToValue(state, ratio) {
+  const curvedRatio = applyCurveRatio(clamp(ratio, 0, 1), state.curve);
+  return state.min + curvedRatio * (state.max - state.min);
+}
+
+export function applyCurveRatio(ratio, curve) {
+  const boundedRatio = clamp(ratio, 0, 1);
+  const exponent = sliderCurveExponent(curve);
+  if (exponent === 1) {
+    return boundedRatio;
+  }
+  if (Number(curve) > 0) {
+    return Math.pow(boundedRatio, exponent);
+  }
+  return 1 - Math.pow(1 - boundedRatio, exponent);
+}
+
+export function invertCurveRatio(ratio, curve) {
+  const boundedRatio = clamp(ratio, 0, 1);
+  const exponent = sliderCurveExponent(curve);
+  if (exponent === 1) {
+    return boundedRatio;
+  }
+  if (Number(curve) > 0) {
+    return Math.pow(boundedRatio, 1 / exponent);
+  }
+  return 1 - Math.pow(1 - boundedRatio, 1 / exponent);
+}
+
+function sliderCurveExponent(curve) {
+  const value = Number(curve);
+  if (!Number.isFinite(value) || value === 0) {
+    return 1;
+  }
+  return Math.pow(2, Math.min(Math.abs(value), 12));
+}
+
 export function quantizeTempoValue(value) {
   return Math.round(value * 10) / 10;
 }

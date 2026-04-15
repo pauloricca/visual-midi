@@ -1,0 +1,53 @@
+title: Mutator Demo
+output: IAC Driver Bus 1
+inertia: 2
+palette:
+  orange: "#d26a2e"
+  moss: "#5f8f6b"
+  clay: "#b85d45"
+  slate: "#5077b5"
+  teal: "#4f8f88"
+rows:
+  - name: patch
+    height: 72%
+    columns:
+      - rows:
+          - name: Cutoff
+            control: 10
+            default: 64
+            color: orange
+          - name: Resonance
+            control: 11
+            default: 32
+            color: clay
+      - rows:
+          - name: Fold
+            control: 12
+            default: 40
+            color: slate
+          - name: Texture
+            control: 13
+            default: 80
+            color: moss
+      - type: sequencer
+        name: Motion
+        mode: cc
+        channel: 1
+        control: 20
+        size: 8
+        subdivision: 1/16
+        min: 0
+        max: 127
+        color: teal
+  - columns:
+      - type: mutator
+        name: Patch Mutator
+        target: patch
+        default: 0.35
+        color: teal
+      - type: memory
+        name: Patch Memory
+        target: patch
+        slots: 4
+        transition: 0.5
+        color: orange

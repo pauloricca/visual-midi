@@ -2,6 +2,7 @@ import { renderButton } from "./controls/button.js";
 import { renderKeyboard } from "./controls/keyboard.js";
 import { renderLfo } from "./controls/lfo.js";
 import { renderMemory } from "./controls/memory.js";
+import { renderMutator } from "./controls/mutator.js";
 import { renderSequencer } from "./controls/sequencer.js";
 import { renderTempo } from "./controls/tempo.js";
 import { applyGroupTracks, applyNodeSizing } from "./utils/layout.js";
@@ -27,6 +28,9 @@ export function renderLayoutWithConfig(node, payload) {
   }
   if (node.type === "memory") {
     return renderMemory(node);
+  }
+  if (node.type === "mutator") {
+    return renderMutator(node);
   }
   if (node.type === "tabs") {
     return renderTabs(node, payload);

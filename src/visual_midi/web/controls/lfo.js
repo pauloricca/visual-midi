@@ -6,6 +6,8 @@ import {
   computeWheelValueDelta,
   normalizeWheelDelta,
   quantizeSliderValue,
+  sliderRatioToValue,
+  sliderValueToRatio,
 } from "../utils/math.js";
 import { applyNodeSizing } from "../utils/layout.js";
 import { queueSliderUpdate } from "./slider.js";
@@ -227,7 +229,7 @@ function mountSliderSurface(state) {
       if (valueDelta === 0) {
         return;
       }
-      setSliderMidpoint(state, state.midpoint + valueDelta);
+      setSliderMidpoint(state, wheelDeltaToSliderValue(state, state.midpoint, valueDelta));
       saveLfoSettings(state);
     },
     { passive: false }
@@ -617,7 +619,8 @@ function updateSliderMidpointFromPointer(state, event, now) {
     state.orientation === "vertical"
       ? -((event.clientY - state.dragStartY) / (rect.height || 1))
       : (event.clientX - state.dragStartX) / (rect.width || 1);
-  const rawValue = state.dragStartValue + travel * (state.max - state.min) * speed;
+  const rawRatio = sliderValueToRatio(state, state.dragStartValue) + travel * speed;
+  const rawValue = sliderRatioToValue(state, rawRatio);
   setSliderMidpoint(state, rawValue);
   updateSliderVelocity(state, event, now, rect);
 }
@@ -631,6 +634,17 @@ function setSliderMidpoint(state, rawValue) {
   syncInactiveLfoOutput(state);
   updateLfoVisuals(state, state.value);
   syncLfoAnimationState(state);
+}
+
+function wheelDeltaToSliderValue(state, currentValue, valueDelta) {
+  if (state.max === state.min) {
+    return state.min;
+  }
+  if (state.steps) {
+    return clamp(currentValue + valueDelta, state.min, state.max);
+  }
+  const ratioDelta = valueDelta / (state.max - state.min);
+  return sliderRatioToValue(state, sliderValueToRatio(state, currentValue) + ratioDelta);
 }
 
 function updateSliderVelocity(state, event, now, rect) {
@@ -754,11 +768,11 @@ function updateLfoVisuals(state, value) {
   if (state.meta) {
     state.meta.textContent = buildLfoMeta(state);
   }
-  updateLfoRangeFill(state.fill, (state.value - state.min) / (state.max - state.min || 1));
+  updateLfoRangeFill(state.fill, sliderValueToRatio(state, state.value));
 }
 
 function sliderValueRatio(state, value) {
-  return (value - state.min) / (state.max - state.min || 1);
+  return sliderValueToRatio(state, value);
 }
 
 function buildSliderMeta(node) {
@@ -843,11 +857,11 @@ function updateComplexLfoVisuals(state) {
     : "Jitter";
   updateLfoRangeFill(
     state.animatedFill,
-    (state.value - state.min) / (state.max - state.min || 1)
+    sliderValueToRatio(state, state.value)
   );
   updateLfoPanelFill(
     state.panels.value.fill,
-    (state.midpoint - state.min) / (state.max - state.min || 1)
+    sliderValueToRatio(state, state.midpoint)
   );
   updateLfoPanelFill(state.panels.depth.fill, state.depth);
   updateLfoPanelFill(state.panels.rate.fill, normalizeLfoRate(state.rate, state));
@@ -876,7 +890,7 @@ function updateLfoPanelFill(fill, ratio) {
 
 function getLfoParameterValue(state, parameter) {
   if (parameter === "midpoint") {
-    return state.midpoint;
+    return sliderValueToRatio(state, state.midpoint);
   }
   if (parameter === "depth") {
     return state.depth;
@@ -892,8 +906,10 @@ function getLfoParameterValue(state, parameter) {
 
 function setLfoParameterValue(state, parameter, startValue, travel) {
   if (parameter === "midpoint") {
-    const range = state.max - state.min;
-    state.midpoint = clamp(startValue + travel * range, state.min, state.max);
+    state.midpoint = quantizeSliderValue(
+      state,
+      sliderRatioToValue(state, startValue + travel)
+    );
     syncInactiveLfoOutput(state);
     return;
   }
@@ -1163,15 +1179,15 @@ function startLfoAnimation(state) {
         (state.noiseTarget - state.noiseValue) * Math.min(1, elapsedSeconds * 4 * state.rate);
     }
 
-    const center = state.midpoint;
-    const amplitude = ((state.max - state.min) / 2) * state.depth;
+    const centerRatio = sliderValueToRatio(state, state.midpoint);
+    const amplitudeRatio = state.depth / 2;
     const lfoShape = getLfoShapeValue(state);
     const compositeShape = shouldUseWaveformControl(state)
       ? lfoShape
       : ((1 - state.jitter) * lfoShape) + (state.jitter * state.noiseValue);
     const nextValue = quantizeSliderValue(
       state,
-      clamp(center + compositeShape * amplitude, state.min, state.max)
+      sliderRatioToValue(state, centerRatio + compositeShape * amplitudeRatio)
     );
 
     if (nextValue !== state.value) {
