@@ -140,6 +140,9 @@ rows:
           root: C4
           scale: minor
           color: plum
+          show_velocity: true
+          show_gate: true
+          show_timing: true
   - height: 20%
     columns:
       - type: tempo

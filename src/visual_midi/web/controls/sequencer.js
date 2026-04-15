@@ -1,5 +1,5 @@
 import { postSequencerSteps } from "../api.js";
-import { WHEEL_DELTA_UNIT, normalizeWheelDelta } from "../utils/math.js";
+import { createSlider } from "../ui/slider.js";
 import { applyNodeSizing } from "../utils/layout.js";
 import {
   formatMidiNote,
@@ -70,63 +70,22 @@ export function renderSequencer(node) {
   };
 
   state.steps.forEach((step, index) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "sequencer-step";
-    button.setAttribute("aria-label", `${node.name} step ${index + 1}`);
-
-    const fill = document.createElement("div");
-    fill.className = "sequencer-step-fill";
-
-    const value = document.createElement("div");
-    value.className = "sequencer-step-value";
-
-    button.append(fill, value);
-    surface.appendChild(button);
-    state.stepElements.push({ button, fill, value });
-
-    const drag = {
-      active: false,
-      pointerId: null,
-      startY: 0,
-      startValue: step.value,
-      wasEnabled: step.enabled,
-      didAdjust: false,
-    };
-
-    button.addEventListener("pointerdown", (event) => {
-      if (!isPrimaryPointerButton(event)) {
-        return;
-      }
-      event.preventDefault();
-      drag.active = true;
-      drag.pointerId = event.pointerId;
-      drag.startY = event.clientY;
-      drag.startValue = state.steps[index].value;
-      drag.wasEnabled = state.steps[index].enabled;
-      drag.didAdjust = false;
-      button.setPointerCapture(event.pointerId);
-    });
-
-    button.addEventListener("pointermove", (event) => {
-      if (!drag.active || !button.hasPointerCapture(event.pointerId)) {
-        return;
-      }
-      event.preventDefault();
-      const delta = drag.startY - event.clientY;
-      if (Math.abs(delta) < 4) {
-        return;
-      }
-      const nextValue = quantizeSequencerValue(state, drag.startValue + delta / 8);
-      updateSequencerStep(state, index, { enabled: true, value: nextValue });
-      drag.didAdjust = true;
-    });
-
-    const releasePointer = (event, { commitTap } = { commitTap: true }) => {
-      if (!drag.active || drag.pointerId !== event.pointerId) {
-        return;
-      }
-      if (commitTap && !drag.didAdjust) {
+    const stepSlider = createSlider({
+      tagName: "button",
+      className: "sequencer-step",
+      fillClassName: "sequencer-step-fill",
+      value: step.value,
+      min: state.min,
+      max: state.max,
+      steps: Math.max(2, Math.round(state.max - state.min) + 1),
+      orientation: "vertical",
+      color: node.color || "#d26a2e",
+      wheelAxis: "vertical",
+      ariaLabel: `${node.name} step ${index + 1}`,
+      onChange: (value) => {
+        updateSequencerStep(state, index, { enabled: true, value });
+      },
+      onTap: () => {
         if (state.steps[index].enabled) {
           updateSequencerStep(state, index, { enabled: false, value: state.steps[index].value });
         } else {
@@ -135,34 +94,17 @@ export function renderSequencer(node) {
             value: state.steps[index].value,
           });
         }
-      }
-      drag.active = false;
-      if (button.hasPointerCapture(event.pointerId)) {
-        button.releasePointerCapture(event.pointerId);
-      }
-    };
-
-    button.addEventListener("pointerup", (event) => releasePointer(event));
-    button.addEventListener("pointercancel", (event) => releasePointer(event, { commitTap: false }));
-    button.addEventListener("lostpointercapture", () => {
-      drag.active = false;
-    });
-
-    button.addEventListener(
-      "wheel",
-      (event) => {
-        event.preventDefault();
-        const normalizedDelta = normalizeWheelDelta(event, event.deltaY);
-        const direction = normalizedDelta > 0 ? 1 : -1;
-        const magnitude = Math.max(1, Math.round(Math.abs(normalizedDelta) / WHEEL_DELTA_UNIT));
-        const currentValue = state.steps[index].value;
-        updateSequencerStep(state, index, {
-          enabled: true,
-          value: quantizeSequencerValue(state, currentValue + direction * magnitude),
-        });
       },
-      { passive: false }
-    );
+    });
+    const button = stepSlider.element;
+    const fill = stepSlider.fill;
+
+    const value = document.createElement("div");
+    value.className = "sequencer-step-value";
+
+    button.append(value);
+    surface.appendChild(button);
+    state.stepElements.push({ button, fill, value, slider: stepSlider });
   });
 
   if (state.mode === "notes" && state.velocityRow) {
@@ -172,13 +114,12 @@ export function renderSequencer(node) {
       key: "velocity",
       label: "velocity",
       elements: state.velocityElements,
-      formatValue: (value) => String(value),
       normalizeValue: normalizeSequencerVelocity,
-      valueToRatio: (value) => (normalizeSequencerVelocity(value) - 1) / 126,
       resetValue: () => defaultSequencerVelocity(state),
+      min: 1,
+      max: 127,
+      steps: 127,
       orientation: "vertical",
-      pointerScale: 1,
-      wheelStep: 1,
     });
   }
 
@@ -189,15 +130,12 @@ export function renderSequencer(node) {
       key: "gate",
       label: "gate",
       elements: state.gateElements,
-      formatValue: formatGateValue,
       normalizeValue: (value) => normalizeSequencerGate(state, value),
-      valueToRatio: (value) =>
-        (normalizeSequencerGate(state, value) - GATE_STEP) /
-        (getSequencerMaxGateSteps(state) - GATE_STEP || 1),
       resetValue: () => defaultSequencerGate(state),
+      min: GATE_STEP,
+      max: getSequencerMaxGateSteps(state),
+      steps: Math.max(2, Math.round((getSequencerMaxGateSteps(state) - GATE_STEP) / GATE_STEP) + 1),
       orientation: "horizontal",
-      pointerScale: 0.02,
-      wheelStep: GATE_STEP,
     });
   }
 
@@ -208,13 +146,12 @@ export function renderSequencer(node) {
       key: "timing",
       label: "timing",
       elements: state.timingElements,
-      formatValue: formatTimingValue,
       normalizeValue: normalizeSequencerTiming,
-      valueToRatio: (value) => (normalizeSequencerTiming(value) + 1) / 2,
       resetValue: () => defaultSequencerTiming(state),
+      min: -1,
+      max: 1,
+      steps: 201,
       orientation: "horizontal",
-      pointerScale: 0.01,
-      wheelStep: 0.01,
     });
   }
 
@@ -298,30 +235,24 @@ function updateSequencerStep(state, index, nextStep) {
 function updateSequencerStepVisual(state, index) {
   const step = state.steps[index];
   const element = state.stepElements[index];
-  const percentage = ((step.value - state.min) / (state.max - state.min || 1)) * 100;
+  element.slider.setValue(step.value, { silent: true });
   element.button.classList.toggle("is-enabled", step.enabled);
   element.button.classList.toggle("is-current", index === state.currentStep);
-  element.fill.style.height = step.enabled ? `${percentage}%` : "0%";
+  if (!step.enabled) {
+    element.fill.style.height = "0%";
+  }
   element.value.textContent = formatSequencerValue(state, step.value, step.enabled);
   updateParamElement(
     state.velocityElements[index],
-    step.velocity,
-    (value) => (value - 1) / 126,
-    `velocity ${step.velocity}`
+    step.velocity
   );
   updateParamElement(
     state.gateElements[index],
-    step.gate,
-    (value) =>
-      (normalizeSequencerGate(state, value) - GATE_STEP) /
-      (getSequencerMaxGateSteps(state) - GATE_STEP || 1),
-    `gate ${formatGateValue(step.gate)}`
+    step.gate
   );
   updateParamElement(
     state.timingElements[index],
-    step.timing,
-    (value) => (normalizeSequencerTiming(value) + 1) / 2,
-    `timing ${formatTimingValue(step.timing)}`
+    step.timing
   );
 }
 
@@ -394,135 +325,75 @@ function renderSequencerParamRow({
   key,
   label,
   elements,
-  formatValue,
   normalizeValue,
-  valueToRatio,
   resetValue,
+  min,
+  max,
+  steps,
   orientation = "horizontal",
-  pointerScale,
-  wheelStep,
 }) {
   const row = document.createElement("div");
   row.className = `sequencer-param-row sequencer-param-row--${orientation}`;
 
   state.steps.forEach((step, index) => {
-    const cell = document.createElement("button");
-    cell.type = "button";
-    cell.className = "sequencer-param-cell";
-    cell.setAttribute("aria-label", `${state.name} step ${index + 1} ${label}`);
-
-    const fill = document.createElement("div");
-    fill.className = "sequencer-param-fill";
+    const paramSlider = createSlider({
+      tagName: "button",
+      className: "sequencer-param-cell",
+      fillClassName: "sequencer-param-fill",
+      value: step[key],
+      min,
+      max,
+      steps,
+      orientation,
+      color: state.color || "#d26a2e",
+      wheelAxis: orientation,
+      ariaLabel: `${state.name} step ${index + 1} ${label}`,
+      onChange: (value) => {
+        updateSequencerStep(state, index, { [key]: normalizeValue(value) });
+      },
+      onTap: () => {
+        const now = performance.now();
+        if (now - element.lastTapAt <= 350) {
+          updateSequencerStep(state, index, { [key]: normalizeValue(resetValue()) });
+          element.lastTapAt = 0;
+        } else {
+          element.lastTapAt = now;
+        }
+      },
+    });
+    const cell = paramSlider.element;
+    const fill = paramSlider.fill;
 
     const value = document.createElement("div");
     value.className = "sequencer-param-value";
 
-    cell.append(fill, value);
+    cell.append(value);
     row.appendChild(cell);
-    const element = { cell, fill, value, valueToRatio, formatValue, label, orientation };
-    elements[index] = element;
-
-    const drag = {
-      active: false,
-      pointerId: null,
-      startX: 0,
-      startY: 0,
-      startValue: step[key],
-      didAdjust: false,
+    const element = {
+      cell,
+      fill,
+      value,
+      label,
+      orientation,
+      slider: paramSlider,
       lastTapAt: 0,
     };
-
-    cell.addEventListener("pointerdown", (event) => {
-      event.preventDefault();
-      drag.active = true;
-      drag.pointerId = event.pointerId;
-      drag.startX = event.clientX;
-      drag.startY = event.clientY;
-      drag.startValue = state.steps[index][key];
-      drag.didAdjust = false;
-      cell.setPointerCapture(event.pointerId);
-    });
-
-    cell.addEventListener("pointermove", (event) => {
-      if (!drag.active || !cell.hasPointerCapture(event.pointerId)) {
-        return;
-      }
-      event.preventDefault();
-      const delta =
-        orientation === "horizontal" ? event.clientX - drag.startX : drag.startY - event.clientY;
-      if (Math.abs(delta) < 4) {
-        return;
-      }
-      updateSequencerStep(state, index, {
-        [key]: normalizeValue(drag.startValue + delta * pointerScale),
-      });
-      drag.didAdjust = true;
-    });
-
-    const releasePointer = (event, { commitTap } = { commitTap: true }) => {
-      if (!drag.active || drag.pointerId !== event.pointerId) {
-        return;
-      }
-      if (commitTap && !drag.didAdjust) {
-        const now = performance.now();
-        if (now - drag.lastTapAt <= 350) {
-          updateSequencerStep(state, index, { [key]: normalizeValue(resetValue()) });
-          drag.lastTapAt = 0;
-        } else {
-          drag.lastTapAt = now;
-        }
-      }
-      drag.active = false;
-      if (cell.hasPointerCapture(event.pointerId)) {
-        cell.releasePointerCapture(event.pointerId);
-      }
-    };
-
-    cell.addEventListener("pointerup", releasePointer);
-    cell.addEventListener("pointercancel", (event) => releasePointer(event, { commitTap: false }));
+    elements[index] = element;
     cell.addEventListener("dblclick", (event) => {
       event.preventDefault();
       updateSequencerStep(state, index, { [key]: normalizeValue(resetValue()) });
-      drag.lastTapAt = 0;
+      element.lastTapAt = 0;
     });
-    cell.addEventListener("lostpointercapture", () => {
-      drag.active = false;
-    });
-
-    cell.addEventListener(
-      "wheel",
-      (event) => {
-        event.preventDefault();
-        const normalizedDelta = normalizeWheelDelta(event, event.deltaY);
-        const direction = normalizedDelta > 0 ? 1 : -1;
-        const magnitude = Math.max(1, Math.round(Math.abs(normalizedDelta) / WHEEL_DELTA_UNIT));
-        updateSequencerStep(state, index, {
-          [key]: normalizeValue(state.steps[index][key] + direction * wheelStep * magnitude),
-        });
-      },
-      { passive: false }
-    );
   });
 
   parent.appendChild(row);
 }
 
-function isPrimaryPointerButton(event) {
-  return event.pointerType === "touch" || event.button === 0;
-}
-
-function updateParamElement(element, rawValue, ratioForValue, label) {
+function updateParamElement(element, rawValue) {
   if (!element) {
     return;
   }
-  const ratio = Math.max(0, Math.min(1, ratioForValue(rawValue)));
-  if (element.orientation === "vertical") {
-    element.fill.style.width = "100%";
-    element.fill.style.height = `${ratio * 100}%`;
-  } else {
-    element.fill.style.width = `${ratio * 100}%`;
-    element.fill.style.height = "100%";
-  }
+  element.slider.setValue(rawValue, { silent: true });
   element.value.textContent = "";
 }
 
@@ -575,18 +446,6 @@ function defaultSequencerTiming(state) {
 function getSequencerMaxGateSteps(state) {
   const maxGateSteps = Number(state.maxGateSteps);
   return Number.isFinite(maxGateSteps) && maxGateSteps >= 1 ? maxGateSteps : 1;
-}
-
-function formatGateValue(value) {
-  return Number(value).toFixed(2).replace(/\.?0+$/, "");
-}
-
-function formatTimingValue(value) {
-  const normalized = normalizeSequencerTiming(value);
-  if (normalized > 0) {
-    return `+${formatGateValue(normalized)}`;
-  }
-  return formatGateValue(normalized);
 }
 
 function registerSequencerView(state) {

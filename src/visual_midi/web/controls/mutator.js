@@ -1,6 +1,7 @@
 import { postMutatorAction } from "../api.js";
 import { refreshFromPayload } from "../app.js";
 import { applyNodeSizing } from "../utils/layout.js";
+import { createSlider } from "../ui/slider.js";
 
 export function renderMutator(node) {
   const wrapper = document.createElement("article");
@@ -14,14 +15,18 @@ export function renderMutator(node) {
     pending: false,
   };
 
-  const slider = document.createElement("input");
-  slider.className = "mutator-degree";
-  slider.type = "range";
-  slider.min = "0";
-  slider.max = "1";
-  slider.step = "0.01";
-  slider.value = String(Number(node.value) || 0);
-  slider.setAttribute("aria-label", `${node.name} mutation amount`);
+  const degree = createSlider({
+    className: "mutator-degree",
+    fillClassName: "mutator-degree-fill",
+    value: Number(node.value) || 0,
+    min: 0,
+    max: 1,
+    steps: null,
+    orientation: "horizontal",
+    color: node.color || "#d26a2e",
+    wheelAxis: "horizontal",
+    ariaLabel: `${node.name} mutation amount`,
+  });
 
   const actions = document.createElement("div");
   actions.className = "mutator-actions";
@@ -31,7 +36,7 @@ export function renderMutator(node) {
   mutateButton.className = "mutator-button";
   mutateButton.textContent = "Mutate";
   mutateButton.addEventListener("click", () => {
-    void applyMutatorAction(state, slider, "mutate", undoButton);
+    void applyMutatorAction(state, degree, "mutate", undoButton);
   });
 
   const undoButton = document.createElement("button");
@@ -40,21 +45,21 @@ export function renderMutator(node) {
   undoButton.textContent = "Undo";
   undoButton.disabled = !node.canUndo;
   undoButton.addEventListener("click", () => {
-    void applyMutatorAction(state, slider, "undo", undoButton);
+    void applyMutatorAction(state, degree, "undo", undoButton);
   });
 
   actions.append(mutateButton, undoButton);
-  wrapper.append(slider, actions);
+  wrapper.append(degree.element, actions);
   return wrapper;
 }
 
-async function applyMutatorAction(state, slider, action, undoButton) {
+async function applyMutatorAction(state, degree, action, undoButton) {
   if (state.pending) {
     return;
   }
   state.pending = true;
   try {
-    const value = Math.max(0, Math.min(1, Number(slider.value) || 0));
+    const value = degree.getValue();
     const response = await postMutatorAction(state.key, value, action);
     if (!response.ok) {
       return;

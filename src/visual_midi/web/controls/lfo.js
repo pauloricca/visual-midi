@@ -1,15 +1,12 @@
 import {
-  INERTIA_FRICTION_PER_FRAME,
-  INERTIA_MIN_VELOCITY,
-  INERTIA_VELOCITY_THRESHOLD,
   clamp,
-  computeWheelValueDelta,
   normalizeWheelDelta,
   quantizeSliderValue,
   sliderRatioToValue,
   sliderValueToRatio,
 } from "../utils/math.js";
 import { applyNodeSizing } from "../utils/layout.js";
+import { createSlider } from "../ui/slider.js";
 import { queueSliderUpdate } from "./slider.js";
 
 const LFO_STORAGE_PREFIX = "visual-midi:lfo:";
@@ -91,14 +88,7 @@ function renderUnifiedSlider(node) {
     meta: null,
     animatedFill: null,
     panels: null,
-    sliderPointerId: null,
-    dragStartValue: persisted.midpoint,
-    lastPointerX: 0,
-    lastPointerY: 0,
-    lastPointerTime: 0,
-    velocity: 0,
-    inertiaFrame: null,
-    wheelRemainder: 0,
+    sliderSurface: null,
     lastTapTime: 0,
     lastTapX: 0,
     lastTapY: 0,
@@ -135,13 +125,35 @@ function mountCurrentLfoView(state) {
 }
 
 function mountSliderSurface(state) {
-  const surface = document.createElement("section");
-  surface.className = `control control--${state.orientation}`;
+  const slider = createSlider({
+    tagName: "section",
+    className: `control control--${state.orientation}`,
+    fillClassName: "control-fill",
+    value: state.value,
+    min: state.min,
+    max: state.max,
+    steps: state.steps,
+    speed: state.speed,
+    curve: state.curve,
+    orientation: state.orientation,
+    color: state.color || "#d26a2e",
+    inertia: state.inertia ?? 0,
+    wheelMode: "legacy",
+    ariaLabel: state.name,
+    onChange: (value) => {
+      stopLfoVisualTransition(state);
+      setSliderMidpoint(state, value);
+    },
+    onCommit: () => {
+      saveLfoSettings(state);
+    },
+    onTap: ({ event }) => {
+      handleLfoPanelTap(state, event);
+    },
+  });
+  const surface = slider.element;
   surface.dataset.key = state.key;
   suppressDoubleTapZoom(surface);
-
-  const fill = document.createElement("div");
-  fill.className = "control-fill";
 
   let title = null;
   let meta = null;
@@ -156,84 +168,16 @@ function mountSliderSurface(state) {
     meta.className = "control-meta";
 
     chrome.append(meta, title);
-    surface.append(fill, chrome);
-  } else {
-    surface.append(fill);
+    surface.append(chrome);
   }
   state.element.replaceChildren(surface);
   state.mode = "slider";
-  state.fill = fill;
+  state.fill = slider.fill;
   state.title = title;
   state.meta = meta;
   state.animatedFill = null;
   state.panels = null;
-
-  surface.addEventListener("pointerdown", (event) => {
-    event.preventDefault();
-    if (consumeLfoToggleGesture(state, event)) {
-      return;
-    }
-    stopLfoVisualTransition(state);
-    stopSliderInertia(state);
-    state.sliderPointerId = event.pointerId;
-    state.dragStartX = event.clientX;
-    state.dragStartY = event.clientY;
-    state.dragStartValue = state.midpoint;
-    state.lastPointerX = event.clientX;
-    state.lastPointerY = event.clientY;
-    state.lastPointerTime = performance.now();
-    state.pointerDownTime = state.lastPointerTime;
-    state.velocity = 0;
-    surface.setPointerCapture(event.pointerId);
-  });
-
-  surface.addEventListener("pointermove", (event) => {
-    if (!surface.hasPointerCapture(event.pointerId)) {
-      return;
-    }
-    event.preventDefault();
-    updateSliderMidpointFromPointer(state, event, performance.now());
-  });
-
-  const finish = (event) => {
-    if (surface.hasPointerCapture(event.pointerId)) {
-      surface.releasePointerCapture(event.pointerId);
-    }
-    rememberTapGesture(state, event);
-    state.sliderPointerId = null;
-    maybeStartSliderInertia(state);
-    saveLfoSettings(state);
-  };
-
-  surface.addEventListener("pointerup", finish);
-  surface.addEventListener("pointercancel", (event) => {
-    if (surface.hasPointerCapture(event.pointerId)) {
-      surface.releasePointerCapture(event.pointerId);
-    }
-    state.sliderPointerId = null;
-    stopSliderInertia(state);
-    saveLfoSettings(state);
-  });
-
-  surface.addEventListener(
-    "wheel",
-    (event) => {
-      event.preventDefault();
-      stopSliderInertia(state);
-      const axisDelta = state.orientation === "vertical" ? event.deltaY : event.deltaX;
-      if (axisDelta === 0) {
-        return;
-      }
-      const normalizedDelta = normalizeWheelDelta(event, axisDelta);
-      const valueDelta = computeWheelValueDelta(state, normalizedDelta);
-      if (valueDelta === 0) {
-        return;
-      }
-      setSliderMidpoint(state, wheelDeltaToSliderValue(state, state.midpoint, valueDelta));
-      saveLfoSettings(state);
-    },
-    { passive: false }
-  );
+  state.sliderSurface = slider;
 }
 
 function mountLfoControls(state) {
@@ -277,6 +221,7 @@ function mountSimpleLfoControls(state) {
   state.meta = meta;
   state.animatedFill = null;
   state.panels = null;
+  state.sliderSurface = null;
 
   const endPointer = (event) => {
     if (surface.hasPointerCapture(event.pointerId)) {
@@ -358,10 +303,10 @@ function mountComplexLfoControls(state) {
   const grid = document.createElement("div");
   grid.className = "lfo-grid";
   const panels = {
-    value: createLfoPanel({ label: "Center" }),
-    depth: createLfoPanel({ label: "Depth" }),
-    rate: createLfoPanel({ label: "Speed" }),
-    shape: createLfoPanel({ label: "Wave" }),
+    value: createLfoPanel({ state, parameter: "midpoint", label: "Center" }),
+    depth: createLfoPanel({ state, parameter: "depth", label: "Depth" }),
+    rate: createLfoPanel({ state, parameter: "rate", label: "Speed" }),
+    shape: createLfoPanel({ state, parameter: getLfoShapeParameter(state), label: "Wave" }),
   };
 
   grid.append(panels.value.element, panels.depth.element, panels.rate.element, panels.shape.element);
@@ -376,12 +321,9 @@ function mountComplexLfoControls(state) {
   state.meta = null;
   state.animatedFill = animatedFill;
   state.panels = panels;
+  state.sliderSurface = null;
 
   attachLfoToggleGesture(surface, state);
-  attachLfoPanelInteraction(panels.value, state, "midpoint");
-  attachLfoPanelInteraction(panels.depth, state, "depth");
-  attachLfoPanelInteraction(panels.rate, state, "rate");
-  attachLfoPanelInteraction(panels.shape, state, getLfoShapeParameter(state));
 }
 
 function createLfoState(node, persisted, extraState) {
@@ -421,13 +363,36 @@ function createLfoState(node, persisted, extraState) {
   return state;
 }
 
-function createLfoPanel({ label }) {
-  const element = document.createElement("section");
-  element.className = "lfo-panel";
+function createLfoPanel({ state, parameter, label }) {
+  const slider = createSlider({
+    tagName: "section",
+    className: "lfo-panel",
+    fillClassName: "lfo-panel-fill",
+    fillMode: "bar",
+    value: getLfoParameterValue(state, parameter),
+    min: 0,
+    max: 1,
+    steps: getLfoParameterSteps(state, parameter),
+    orientation: "vertical",
+    color: state.color || "#d26a2e",
+    wheelAxis: "vertical",
+    ariaLabel: `${state.name} ${label}`,
+    onChange: (value) => {
+      stopLfoVisualTransition(state);
+      ensureLfoAnimation(state);
+      setLfoParameterAbsoluteValue(state, parameter, value);
+      updateLfoVisuals(state, state.value);
+      syncLfoAnimationState(state);
+    },
+    onCommit: () => {
+      saveLfoSettings(state);
+    },
+    onTap: ({ event }) => {
+      handleLfoPanelTap(state, event);
+    },
+  });
+  const element = slider.element;
   suppressDoubleTapZoom(element);
-
-  const fill = document.createElement("div");
-  fill.className = "lfo-panel-fill";
 
   const chrome = document.createElement("div");
   chrome.className = "lfo-panel-chrome";
@@ -437,75 +402,23 @@ function createLfoPanel({ label }) {
   labelNode.textContent = label;
 
   chrome.append(labelNode);
-  element.append(fill, chrome);
-  return { element, fill, labelNode };
+  element.append(chrome);
+  return { element, fill: slider.fill, labelNode, slider, parameter };
 }
 
-function attachLfoPanelInteraction(panel, state, parameter) {
-  const drag = {
-    active: false,
-    pointerId: null,
-    startY: 0,
-    startValue: 0,
-  };
-
-  panel.element.addEventListener("pointerdown", (event) => {
-    event.preventDefault();
-    if (consumeLfoToggleGesture(state, event)) {
-      return;
-    }
-    stopLfoVisualTransition(state);
-    ensureLfoAnimation(state);
-    drag.active = true;
-    drag.pointerId = event.pointerId;
-    drag.startY = event.clientY;
-    state.dragStartX = event.clientX;
-    state.dragStartY = event.clientY;
-    state.pointerDownTime = performance.now();
-    drag.startValue = getLfoParameterValue(state, parameter);
-    panel.element.setPointerCapture(event.pointerId);
-  });
-
-  panel.element.addEventListener("pointermove", (event) => {
-    if (!drag.active || !panel.element.hasPointerCapture(event.pointerId)) {
-      return;
-    }
-    event.preventDefault();
-    const rect = panel.element.getBoundingClientRect();
-    const travel = (drag.startY - event.clientY) / (rect.height || 1);
-    setLfoParameterValue(state, parameter, drag.startValue, travel);
-    updateLfoVisuals(state, state.value);
-    syncLfoAnimationState(state);
-  });
-
-  const finish = (event) => {
-    if (!drag.active || drag.pointerId !== event.pointerId) {
-      return;
-    }
-    drag.active = false;
-    if (panel.element.hasPointerCapture(event.pointerId)) {
-      panel.element.releasePointerCapture(event.pointerId);
-    }
-    rememberTapGesture(state, event);
-    saveLfoSettings(state);
-    syncLfoAnimationState(state);
-  };
-
-  panel.element.addEventListener("pointerup", finish);
-  panel.element.addEventListener("pointercancel", finish);
-
-  panel.element.addEventListener(
-    "wheel",
-    (event) => {
-      event.preventDefault();
-      const normalizedDelta = normalizeWheelDelta(event, event.deltaY);
-      setLfoParameterValue(state, parameter, getLfoParameterValue(state, parameter), normalizedDelta / 280);
-      updateLfoVisuals(state, state.value);
-      saveLfoSettings(state);
-      syncLfoAnimationState(state);
-    },
-    { passive: false }
-  );
+function handleLfoPanelTap(state, event) {
+  const now = performance.now();
+  const isSecondTap =
+    now - state.lastTapTime < LFO_TAP_WINDOW_MS &&
+    pointerDistance(event.clientX, event.clientY, state.lastTapX, state.lastTapY) <= LFO_TAP_MOVE_PX;
+  if (isSecondTap) {
+    state.lastTapTime = 0;
+    toggleLfoControls(state);
+    return;
+  }
+  state.lastTapTime = now;
+  state.lastTapX = event.clientX;
+  state.lastTapY = event.clientY;
 }
 
 function updateSimpleLfoFromPointer(state, event) {
@@ -612,19 +525,6 @@ function toggleLfoControls(state) {
   syncLfoAnimationState(state);
 }
 
-function updateSliderMidpointFromPointer(state, event, now) {
-  const rect = event.currentTarget.getBoundingClientRect();
-  const speed = state.speed || 1;
-  const travel =
-    state.orientation === "vertical"
-      ? -((event.clientY - state.dragStartY) / (rect.height || 1))
-      : (event.clientX - state.dragStartX) / (rect.width || 1);
-  const rawRatio = sliderValueToRatio(state, state.dragStartValue) + travel * speed;
-  const rawValue = sliderRatioToValue(state, rawRatio);
-  setSliderMidpoint(state, rawValue);
-  updateSliderVelocity(state, event, now, rect);
-}
-
 function setSliderMidpoint(state, rawValue) {
   const nextMidpoint = quantizeSliderValue(state, clamp(rawValue, state.min, state.max));
   if (nextMidpoint === state.midpoint) {
@@ -636,72 +536,10 @@ function setSliderMidpoint(state, rawValue) {
   syncLfoAnimationState(state);
 }
 
-function wheelDeltaToSliderValue(state, currentValue, valueDelta) {
-  if (state.max === state.min) {
-    return state.min;
-  }
-  if (state.steps) {
-    return clamp(currentValue + valueDelta, state.min, state.max);
-  }
-  const ratioDelta = valueDelta / (state.max - state.min);
-  return sliderRatioToValue(state, sliderValueToRatio(state, currentValue) + ratioDelta);
-}
-
-function updateSliderVelocity(state, event, now, rect) {
-  const speed = state.speed || 1;
-  const pointerDelta =
-    state.orientation === "vertical"
-      ? -(event.clientY - state.lastPointerY) / (rect.height || 1)
-      : (event.clientX - state.lastPointerX) / (rect.width || 1);
-  const timeDelta = Math.max(now - state.lastPointerTime, 1);
-  const instantVelocity = ((pointerDelta * (state.max - state.min) * speed) * 1000) / timeDelta;
-  state.velocity = state.velocity * 0.35 + instantVelocity * 0.65;
-  state.lastPointerX = event.clientX;
-  state.lastPointerY = event.clientY;
-  state.lastPointerTime = now;
-}
-
-function maybeStartSliderInertia(state) {
-  const scaledVelocity = state.velocity * (state.inertia ?? 1);
-  if (Math.abs(scaledVelocity) < INERTIA_VELOCITY_THRESHOLD) {
-    state.velocity = 0;
-    return;
-  }
-  state.velocity = scaledVelocity;
-
-  let previousTime = performance.now();
-  const tick = (now) => {
-    const elapsed = Math.max(now - previousTime, 1);
-    previousTime = now;
-
-    const previousMidpoint = state.midpoint;
-    setSliderMidpoint(state, state.midpoint + (state.velocity * elapsed) / 1000);
-
-    state.velocity *= Math.pow(INERTIA_FRICTION_PER_FRAME, elapsed / 16.67);
-    const hitBoundary = state.midpoint === state.min || state.midpoint === state.max;
-    if (
-      Math.abs(state.velocity) < INERTIA_MIN_VELOCITY ||
-      hitBoundary ||
-      state.midpoint === previousMidpoint
-    ) {
-      state.velocity = 0;
-      state.inertiaFrame = null;
-      saveLfoSettings(state);
-      return;
-    }
-
-    state.inertiaFrame = window.requestAnimationFrame(tick);
-  };
-
-  state.inertiaFrame = window.requestAnimationFrame(tick);
-}
-
 function stopSliderInertia(state) {
-  if (state.inertiaFrame !== null) {
-    window.cancelAnimationFrame(state.inertiaFrame);
-    state.inertiaFrame = null;
+  if (state.sliderSurface) {
+    state.sliderSurface.stopInertia();
   }
-  state.velocity = 0;
 }
 
 function isLfoActive(state) {
@@ -748,12 +586,8 @@ function updateLfoVisuals(state, value) {
     if (state.meta) {
       state.meta.textContent = buildSliderMeta(state);
     }
-    if (state.orientation === "vertical") {
-      state.fill.style.height = `${sliderValueRatio(state, state.value) * 100}%`;
-      state.fill.style.width = "100%";
-    } else {
-      state.fill.style.width = `${sliderValueRatio(state, state.value) * 100}%`;
-      state.fill.style.height = "100%";
+    if (state.sliderSurface) {
+      state.sliderSurface.setValue(state.value, { silent: true });
     }
     return;
   }
@@ -769,10 +603,6 @@ function updateLfoVisuals(state, value) {
     state.meta.textContent = buildLfoMeta(state);
   }
   updateLfoRangeFill(state.fill, sliderValueToRatio(state, state.value));
-}
-
-function sliderValueRatio(state, value) {
-  return sliderValueToRatio(state, value);
 }
 
 function buildSliderMeta(node) {
@@ -859,15 +689,12 @@ function updateComplexLfoVisuals(state) {
     state.animatedFill,
     sliderValueToRatio(state, state.value)
   );
-  updateLfoPanelFill(
-    state.panels.value.fill,
-    sliderValueToRatio(state, state.midpoint)
-  );
-  updateLfoPanelFill(state.panels.depth.fill, state.depth);
-  updateLfoPanelFill(state.panels.rate.fill, normalizeLfoRate(state.rate, state));
-  updateLfoPanelFill(
-    state.panels.shape.fill,
-    shouldUseWaveformControl(state) ? normalizeLfoWaveform(state) : state.jitter
+  state.panels.value.slider.setValue(sliderValueToRatio(state, state.midpoint), { silent: true });
+  state.panels.depth.slider.setValue(state.depth, { silent: true });
+  state.panels.rate.slider.setValue(normalizeLfoRate(state.rate, state), { silent: true });
+  state.panels.shape.slider.setValue(
+    shouldUseWaveformControl(state) ? normalizeLfoWaveform(state) : state.jitter,
+    { silent: true }
   );
 }
 
@@ -878,14 +705,6 @@ function updateLfoRangeFill(fill, valueRatio) {
   fill.style.top = "auto";
   fill.style.bottom = "0";
   fill.style.height = `${boundedValue * 100}%`;
-}
-
-function updateLfoPanelFill(fill, ratio) {
-  fill.style.top = "auto";
-  fill.style.bottom = "0";
-  fill.style.transform = "";
-  fill.style.width = "100%";
-  fill.style.height = `${clamp(ratio, 0, 1) * 100}%`;
 }
 
 function getLfoParameterValue(state, parameter) {
@@ -902,6 +721,23 @@ function getLfoParameterValue(state, parameter) {
     return normalizeLfoWaveform(state);
   }
   return state.jitter;
+}
+
+function getLfoParameterSteps(state, parameter) {
+  if (parameter === "midpoint") {
+    return state.steps;
+  }
+  if (parameter === "rate" && shouldQuantizeLfoRate(state)) {
+    return lfoRateOptions(state).length;
+  }
+  if (parameter === "waveform") {
+    return getLfoWaveforms(state).length;
+  }
+  return null;
+}
+
+function setLfoParameterAbsoluteValue(state, parameter, value) {
+  setLfoParameterValue(state, parameter, 0, value);
 }
 
 function setLfoParameterValue(state, parameter, startValue, travel) {
