@@ -149,6 +149,28 @@ class ButtonConfig:
 
 
 @dataclass(frozen=True)
+class CurveConfig:
+    name: str
+    output: str
+    channel: int
+    control: int
+    length: float
+    mode: str = "loop"
+    default: int = 0
+    minimum: int = 0
+    maximum: int = 127
+    color: str = "#d26a2e"
+    show_label: bool = True
+    width: SizeSpec | None = None
+    height: SizeSpec | None = None
+    osc: "OscRouteConfig | None" = None
+
+    @property
+    def state_key(self) -> str:
+        return f"curve:ch{self.channel}:cc{self.control}:{self.name}"
+
+
+@dataclass(frozen=True)
 class TempoConfig:
     name: str
     output: str
@@ -264,6 +286,7 @@ ControlConfig = Union[
     SliderConfig,
     KeyboardConfig,
     ButtonConfig,
+    CurveConfig,
     TempoConfig,
     SequencerConfig,
     MemoryConfig,
@@ -273,6 +296,7 @@ LayoutNode = Union[
     SliderConfig,
     KeyboardConfig,
     ButtonConfig,
+    CurveConfig,
     TempoConfig,
     SequencerConfig,
     MemoryConfig,
@@ -290,6 +314,7 @@ class AppConfig:
     inertia: float
     layout: LayoutNode
     sliders: list[SliderConfig]
+    curves: list[CurveConfig] | None = None
     tempo: TempoConfig | None = None
     sequencers: list[SequencerConfig] | None = None
     memories: list[MemoryConfig] | None = None
@@ -430,6 +455,10 @@ def build_web_server(*, runtime: "RuntimeState") -> ThreadingHTTPServer:
                 self.handle_slider_post()
                 return
 
+            if parsed.path == "/api/curve":
+                self.handle_curve_post()
+                return
+
             if parsed.path == "/api/keyboard":
                 self.handle_keyboard_post()
                 return
@@ -476,6 +505,30 @@ def build_web_server(*, runtime: "RuntimeState") -> ThreadingHTTPServer:
                 {
                     "key": updated.state_key,
                     "value": normalize_numeric_value(runtime.get_slider_value(updated)),
+                }
+            ).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def handle_curve_post(self) -> None:
+            content_length = int(self.headers.get("Content-Length", "0"))
+            raw = self.rfile.read(content_length)
+            try:
+                body = json.loads(raw.decode("utf-8"))
+                state_key = str(body["key"])
+                value = float(body["value"])
+                updated = runtime.send_curve_value_by_key(state_key, value)
+            except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+                self.send_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+
+            payload = json.dumps(
+                {
+                    "key": updated.state_key,
+                    "value": normalize_numeric_value(quantize_curve_value(updated, value)),
                 }
             ).encode("utf-8")
             self.send_response(HTTPStatus.OK)
@@ -715,6 +768,7 @@ def load_config(config_path: Path) -> AppConfig:
     palette = parse_palette(raw.get("palette"), config_path=config_path)
     layout = parse_root_layout(raw=raw, config_path=config_path, palette=palette, root_bpm=bpm)
     sliders = collect_sliders(layout)
+    curves = collect_curves(layout)
     tempo = collect_tempo(layout)
     sequencers = collect_sequencers(layout)
     memories = collect_memories(layout)
@@ -735,6 +789,7 @@ def load_config(config_path: Path) -> AppConfig:
         inertia=inertia,
         layout=layout,
         sliders=sliders,
+        curves=curves,
         tempo=tempo,
         sequencers=sequencers,
         memories=memories,
@@ -1024,6 +1079,14 @@ def parse_control(
             palette=palette,
             defaults=defaults,
         )
+    if control_type == "curve":
+        return parse_curve_control(
+            raw,
+            config_path=config_path,
+            path=path,
+            palette=palette,
+            defaults=defaults,
+        )
     if control_type == "tempo":
         return parse_tempo(
             raw,
@@ -1058,7 +1121,7 @@ def parse_control(
             defaults=defaults,
         )
     raise SystemExit(
-        f"{config_path} {path}.type must be 'slider', 'lfo', 'keyboard', 'button', 'tempo', 'sequencer', 'memory', or 'mutator'"
+        f"{config_path} {path}.type must be 'slider', 'lfo', 'keyboard', 'button', 'curve', 'tempo', 'sequencer', 'memory', or 'mutator'"
     )
 
 
@@ -1244,6 +1307,72 @@ def parse_button(
     except KeyError as exc:
         missing = exc.args[0]
         raise SystemExit(f"{config_path} {path} is missing '{missing}'") from exc
+
+
+def parse_curve_control(
+    raw: dict[str, Any],
+    *,
+    config_path: Path,
+    path: str,
+    palette: dict[str, str],
+    defaults: LayoutDefaults,
+) -> CurveConfig:
+    try:
+        minimum = validate_range(
+            int(raw.get("min", defaults.minimum)), 0, 127, f"{path}.min", config_path
+        )
+        maximum = validate_range(
+            int(raw.get("max", defaults.maximum)), 0, 127, f"{path}.max", config_path
+        )
+        default = validate_range(
+            int(raw.get("default", raw.get("initial", defaults.default))),
+            0,
+            127,
+            f"{path}.default",
+            config_path,
+        )
+        curve = CurveConfig(
+            name=str(raw["name"]),
+            output=parse_output_name(
+                raw.get("output", defaults.output),
+                config_path=config_path,
+                path=f"{path}.output",
+            ),
+            channel=validate_range(
+                int(raw.get("channel", defaults.channel)), 1, 16, f"{path}.channel", config_path
+            ),
+            control=validate_range(int(raw["control"]), 0, 127, f"{path}.control", config_path),
+            length=parse_positive_duration(
+                raw.get("length", 1.0), config_path=config_path, path=f"{path}.length"
+            ),
+            mode=parse_curve_mode(raw.get("mode", "loop"), config_path=config_path, path=f"{path}.mode"),
+            default=default,
+            minimum=minimum,
+            maximum=maximum,
+            color=resolve_color(
+                raw.get("color", defaults.color),
+                palette=palette,
+                config_path=config_path,
+                path=f"{path}.color",
+            ),
+            show_label=parse_boolean(
+                raw.get("show_label", defaults.show_label),
+                config_path=config_path,
+                path=f"{path}.show_label",
+            ),
+            width=parse_size(raw.get("width"), config_path=config_path, path=f"{path}.width"),
+            height=parse_size(raw.get("height"), config_path=config_path, path=f"{path}.height"),
+            osc=parse_osc_route(raw.get("osc"), config_path=config_path, path=f"{path}.osc"),
+        )
+    except KeyError as exc:
+        missing = exc.args[0]
+        raise SystemExit(f"{config_path} {path} is missing '{missing}'") from exc
+
+    if curve.minimum > curve.maximum:
+        raise SystemExit(f"{config_path} {path} has min greater than max")
+    if not curve.minimum <= curve.default <= curve.maximum:
+        raise SystemExit(f"{config_path} {path} has default outside min/max range")
+    return curve
 
 
 def parse_tempo(
@@ -1706,6 +1835,24 @@ def parse_curve(raw: Any, *, config_path: Path, path: str) -> float:
     return value
 
 
+def parse_positive_duration(raw: Any, *, config_path: Path, path: str) -> float:
+    if isinstance(raw, bool):
+        raise SystemExit(f"{config_path} {path} must be a number")
+    value = parse_numeric_value(raw, config_path=config_path, path=path)
+    if value <= 0:
+        raise SystemExit(f"{config_path} {path} must be greater than 0")
+    return value
+
+
+def parse_curve_mode(raw: Any, *, config_path: Path, path: str) -> str:
+    if not isinstance(raw, str) or not raw.strip():
+        raise SystemExit(f"{config_path} {path} must be 'loop' or 'trigger'")
+    value = raw.strip().lower()
+    if value not in {"loop", "trigger"}:
+        raise SystemExit(f"{config_path} {path} must be 'loop' or 'trigger'")
+    return value
+
+
 def parse_nonnegative_speed(raw: Any, *, config_path: Path, path: str) -> float:
     try:
         value = float(raw)
@@ -1885,7 +2032,7 @@ def parse_size(value: Any, *, config_path: Path, path: str) -> SizeSpec | None:
 def collect_sliders(node: LayoutNode) -> list[SliderConfig]:
     if isinstance(node, SliderConfig):
         return [node]
-    if isinstance(node, (KeyboardConfig, ButtonConfig, TempoConfig, SequencerConfig, MemoryConfig, MutatorConfig)):
+    if isinstance(node, (KeyboardConfig, ButtonConfig, CurveConfig, TempoConfig, SequencerConfig, MemoryConfig, MutatorConfig)):
         return []
     if isinstance(node, TabsConfig):
         sliders: list[SliderConfig] = []
@@ -1899,10 +2046,27 @@ def collect_sliders(node: LayoutNode) -> list[SliderConfig]:
     return sliders
 
 
+def collect_curves(node: LayoutNode) -> list[CurveConfig]:
+    if isinstance(node, CurveConfig):
+        return [node]
+    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, TempoConfig, SequencerConfig, MemoryConfig, MutatorConfig)):
+        return []
+    if isinstance(node, TabsConfig):
+        curves: list[CurveConfig] = []
+        for tab in node.tabs:
+            curves.extend(collect_curves(tab.content))
+        return curves
+
+    curves: list[CurveConfig] = []
+    for child in node.children:
+        curves.extend(collect_curves(child))
+    return curves
+
+
 def collect_buttons_by_key(node: LayoutNode) -> dict[str, ButtonConfig]:
     if isinstance(node, ButtonConfig):
         return {node.state_key: node}
-    if isinstance(node, (SliderConfig, KeyboardConfig, TempoConfig, SequencerConfig, MemoryConfig, MutatorConfig)):
+    if isinstance(node, (SliderConfig, KeyboardConfig, CurveConfig, TempoConfig, SequencerConfig, MemoryConfig, MutatorConfig)):
         return {}
     if isinstance(node, TabsConfig):
         buttons: dict[str, ButtonConfig] = {}
@@ -1919,7 +2083,7 @@ def collect_buttons_by_key(node: LayoutNode) -> dict[str, ButtonConfig]:
 def find_keyboard_by_key(node: LayoutNode, state_key: str) -> KeyboardConfig | None:
     if isinstance(node, KeyboardConfig):
         return node if node.state_key == state_key else None
-    if isinstance(node, (SliderConfig, ButtonConfig, TempoConfig, SequencerConfig, MemoryConfig, MutatorConfig)):
+    if isinstance(node, (SliderConfig, ButtonConfig, CurveConfig, TempoConfig, SequencerConfig, MemoryConfig, MutatorConfig)):
         return None
     if isinstance(node, TabsConfig):
         for tab in node.tabs:
@@ -1938,7 +2102,7 @@ def find_keyboard_by_key(node: LayoutNode, state_key: str) -> KeyboardConfig | N
 def collect_tempo(node: LayoutNode) -> TempoConfig | None:
     if isinstance(node, TempoConfig):
         return node
-    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, SequencerConfig, MemoryConfig, MutatorConfig)):
+    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, CurveConfig, SequencerConfig, MemoryConfig, MutatorConfig)):
         return None
     if isinstance(node, TabsConfig):
         found: TempoConfig | None = None
@@ -1965,7 +2129,7 @@ def collect_tempo(node: LayoutNode) -> TempoConfig | None:
 def collect_sequencers(node: LayoutNode) -> list[SequencerConfig]:
     if isinstance(node, SequencerConfig):
         return [node]
-    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, TempoConfig, MemoryConfig, MutatorConfig)):
+    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, CurveConfig, TempoConfig, MemoryConfig, MutatorConfig)):
         return []
     if isinstance(node, TabsConfig):
         sequencers: list[SequencerConfig] = []
@@ -1982,7 +2146,7 @@ def collect_sequencers(node: LayoutNode) -> list[SequencerConfig]:
 def collect_memories(node: LayoutNode) -> list[MemoryConfig]:
     if isinstance(node, MemoryConfig):
         return [node]
-    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, TempoConfig, SequencerConfig, MutatorConfig)):
+    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, CurveConfig, TempoConfig, SequencerConfig, MutatorConfig)):
         return []
     if isinstance(node, TabsConfig):
         memories: list[MemoryConfig] = []
@@ -1999,7 +2163,7 @@ def collect_memories(node: LayoutNode) -> list[MemoryConfig]:
 def collect_mutators(node: LayoutNode) -> list[MutatorConfig]:
     if isinstance(node, MutatorConfig):
         return [node]
-    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, TempoConfig, SequencerConfig, MemoryConfig)):
+    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, CurveConfig, TempoConfig, SequencerConfig, MemoryConfig)):
         return []
     if isinstance(node, TabsConfig):
         mutators: list[MutatorConfig] = []
@@ -2020,7 +2184,7 @@ def collect_midi_output_names(config: AppConfig) -> set[str]:
 
 
 def collect_layout_midi_output_names(node: LayoutNode, names: set[str]) -> None:
-    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, TempoConfig, SequencerConfig)):
+    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, CurveConfig, TempoConfig, SequencerConfig)):
         names.add(node.output)
         return
     if isinstance(node, (MemoryConfig, MutatorConfig)):
@@ -2034,7 +2198,7 @@ def collect_layout_midi_output_names(node: LayoutNode, names: set[str]) -> None:
 
 
 def count_controls(node: LayoutNode) -> int:
-    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, TempoConfig, SequencerConfig, MemoryConfig, MutatorConfig)):
+    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, CurveConfig, TempoConfig, SequencerConfig, MemoryConfig, MutatorConfig)):
         return 1
     if isinstance(node, TabsConfig):
         return sum(count_controls(tab.content) for tab in node.tabs)
@@ -2045,6 +2209,8 @@ def layout_has_osc_routes(node: LayoutNode) -> bool:
     if isinstance(node, SliderConfig):
         return node.osc is not None
     if isinstance(node, ButtonConfig):
+        return node.osc is not None
+    if isinstance(node, CurveConfig):
         return node.osc is not None
     if isinstance(node, KeyboardConfig):
         return False
@@ -2100,7 +2266,7 @@ def resolve_memory_target(node: LayoutNode, target: str) -> LayoutNode | None:
 
 
 def collect_memory_target_matches(node: LayoutNode, target: str, matches: list[LayoutNode]) -> None:
-    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, TempoConfig, SequencerConfig, MemoryConfig, MutatorConfig)):
+    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, CurveConfig, TempoConfig, SequencerConfig, MemoryConfig, MutatorConfig)):
         if getattr(node, "name", None) == target:
             matches.append(node)
         return
@@ -2119,7 +2285,7 @@ def collect_memory_target_matches(node: LayoutNode, target: str, matches: list[L
 def target_has_recallable_state(node: LayoutNode) -> bool:
     if isinstance(node, (SliderConfig, TempoConfig, SequencerConfig)):
         return True
-    if isinstance(node, (KeyboardConfig, ButtonConfig, MemoryConfig, MutatorConfig)):
+    if isinstance(node, (KeyboardConfig, ButtonConfig, CurveConfig, MemoryConfig, MutatorConfig)):
         return False
     if isinstance(node, TabsConfig):
         return any(target_has_recallable_state(tab.content) for tab in node.tabs)
@@ -2131,7 +2297,7 @@ def target_has_mutable_state(node: LayoutNode, mutator: MutatorConfig) -> bool:
         return True
     if isinstance(node, SequencerConfig):
         return mutator_can_mutate_sequencer(mutator)
-    if isinstance(node, (KeyboardConfig, ButtonConfig, MemoryConfig, MutatorConfig)):
+    if isinstance(node, (KeyboardConfig, ButtonConfig, CurveConfig, MemoryConfig, MutatorConfig)):
         return False
     if isinstance(node, TabsConfig):
         return any(target_has_mutable_state(tab.content, mutator) for tab in node.tabs)
@@ -2489,6 +2655,8 @@ class RuntimeState:
         self._active_notes: dict[tuple[str, int, int], int] = {}
         self._active_buttons: dict[str, int] = {}
         self._sliders_by_key = {slider.state_key: slider for slider in config.sliders}
+        self._curves = config.curves or []
+        self._curves_by_key = {curve.state_key: curve for curve in self._curves}
         self._buttons_by_key = collect_buttons_by_key(config.layout)
         self._sequencers = config.sequencers or []
         self._sequencers_by_key = {sequencer.state_key: sequencer for sequencer in self._sequencers}
@@ -2555,6 +2723,15 @@ class RuntimeState:
             self._update_slider_locked(slider, value)
             return slider
 
+    def send_curve_value_by_key(self, state_key: str, value: float) -> CurveConfig:
+        self.reload_if_needed()
+        with self.lock:
+            curve = self._curves_by_key.get(state_key)
+            if curve is None:
+                raise ValueError(f"Unknown curve key: {state_key}")
+            self._send_curve_value_locked(curve, value)
+            return curve
+
     def get_tempo_value(self, tempo: TempoConfig) -> float:
         self.reload_if_needed()
         with self.lock:
@@ -2595,6 +2772,8 @@ class RuntimeState:
                 self._update_slider_locked(
                     slider, self._state.get(slider.state_key, float(slider.default)), force_midi=True
                 )
+            for curve in self._curves:
+                self._send_curve_value_locked(curve, curve.default, force_midi=True)
 
     def send_keyboard_gate(self, *, state_key: str, note: int, gate: bool) -> None:
         self.reload_if_needed()
@@ -2749,6 +2928,8 @@ class RuntimeState:
             if new_midi_outputs is not None:
                 self._last_midi_values = {}
             self._sliders_by_key = {slider.state_key: slider for slider in new_config.sliders}
+            self._curves = new_config.curves or []
+            self._curves_by_key = {curve.state_key: curve for curve in self._curves}
             self._buttons_by_key = collect_buttons_by_key(new_config.layout)
             self._sequencers = new_config.sequencers or []
             self._sequencers_by_key = {
@@ -2792,6 +2973,8 @@ class RuntimeState:
                     self._state.get(slider.state_key, float(slider.default)),
                     force_midi=True,
                 )
+            for curve in self._curves:
+                self._send_curve_value_locked(curve, curve.default, force_midi=True)
 
         if new_midi_outputs is not None:
             close_midi_outputs(old_midi_outputs)
@@ -2839,6 +3022,25 @@ class RuntimeState:
                 "showLabel": node.show_label,
                 "width": serialize_size(node.width),
                 "height": serialize_size(node.height),
+            }
+        if isinstance(node, CurveConfig):
+            return {
+                "type": "curve",
+                "key": node.state_key,
+                "name": node.name,
+                "mode": node.mode,
+                "length": normalize_numeric_value(node.length),
+                "default": node.default,
+                "initial": node.default,
+                "channel": node.channel,
+                "control": node.control,
+                "min": node.minimum,
+                "max": node.maximum,
+                "color": node.color,
+                "showLabel": node.show_label,
+                "width": serialize_size(node.width),
+                "height": serialize_size(node.height),
+                "osc": serialize_osc_route(node.osc),
             }
         if isinstance(node, TempoConfig):
             return {
@@ -2991,6 +3193,27 @@ class RuntimeState:
         self._save_state_locked()
         self._send_midi_value(slider, bounded, force=force_midi)
         self._send_osc_value(slider, bounded)
+
+    def _send_curve_value_locked(self, curve: CurveConfig, value: float, *, force_midi: bool = False) -> None:
+        bounded = quantize_curve_value(curve, value)
+        self._send_midi_control_value(
+            output=curve.output,
+            state_key=curve.state_key,
+            channel=curve.channel,
+            control=curve.control,
+            value=bounded,
+            force=force_midi,
+        )
+        if curve.osc is None or self._osc_client is None:
+            return
+        osc_value = map_value(
+            bounded,
+            input_min=curve.minimum,
+            input_max=curve.maximum,
+            output_min=curve.osc.minimum,
+            output_max=curve.osc.maximum,
+        )
+        self._osc_client.send_message(curve.osc.path, normalize_numeric_value(osc_value))
 
     def _update_tempo_locked(self, value: float) -> None:
         if self._tempo is None:
@@ -3178,7 +3401,7 @@ class RuntimeState:
                 self._mutated_sequencer_step(mutator, node, step, degree) for step in steps
             ]
             return
-        if isinstance(node, (KeyboardConfig, ButtonConfig, MemoryConfig, MutatorConfig)):
+        if isinstance(node, (KeyboardConfig, ButtonConfig, CurveConfig, MemoryConfig, MutatorConfig)):
             return
         if isinstance(node, TabsConfig):
             for tab in node.tabs:
@@ -3273,7 +3496,7 @@ class RuntimeState:
                 for step in self._sequencer_state.get(node.state_key, [])
             ]
             return
-        if isinstance(node, (KeyboardConfig, ButtonConfig, MemoryConfig, MutatorConfig)):
+        if isinstance(node, (KeyboardConfig, ButtonConfig, CurveConfig, MemoryConfig, MutatorConfig)):
             return
         if isinstance(node, TabsConfig):
             for tab in node.tabs:
@@ -3349,19 +3572,38 @@ class RuntimeState:
         return config.output
 
     def _send_midi_value(self, slider: SliderConfig, value: float, *, force: bool = False) -> None:
+        self._send_midi_control_value(
+            output=slider.output,
+            state_key=slider.state_key,
+            channel=slider.channel,
+            control=slider.control,
+            value=value,
+            force=force,
+        )
+
+    def _send_midi_control_value(
+        self,
+        *,
+        output: str,
+        state_key: str,
+        channel: int,
+        control: int,
+        value: float,
+        force: bool = False,
+    ) -> None:
         midi_value = clamp_numeric_value(round(value), minimum=0, maximum=127)
         midi_value = int(midi_value)
-        midi_key = f"{slider.output}:{slider.state_key}"
+        midi_key = f"{output}:{state_key}"
         previous_value = self._last_midi_values.get(midi_key)
         if not force and previous_value == midi_value:
             return
         message = mido.Message(
             "control_change",
-            channel=slider.channel - 1,
-            control=slider.control,
+            channel=channel - 1,
+            control=control,
             value=midi_value,
         )
-        self._midi_output(slider.output).send(message)
+        self._midi_output(output).send(message)
         self._last_midi_values[midi_key] = midi_value
 
     def _send_note_gate_locked(self, *, output: str, channel: int, note: int, gate: bool) -> None:
@@ -3659,6 +3901,10 @@ def quantize_slider_value(slider: SliderConfig, value: float) -> float:
     step_index = round((bounded - slider.minimum) / step_size)
     quantized = slider.minimum + (step_index * step_size)
     return clamp_numeric_value(quantized, minimum=slider.minimum, maximum=slider.maximum)
+
+
+def quantize_curve_value(curve: CurveConfig, value: float) -> float:
+    return clamp_numeric_value(value, minimum=curve.minimum, maximum=curve.maximum)
 
 
 def quantize_tempo_value(tempo: TempoConfig, value: float) -> float:

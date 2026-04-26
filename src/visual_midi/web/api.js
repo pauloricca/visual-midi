@@ -36,6 +36,14 @@ export async function postSliderValue(key, value) {
   });
 }
 
+export async function postCurveValue(key, value) {
+  return fetch("/api/curve", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key, value }),
+  });
+}
+
 export async function postSequencerSteps(key, steps) {
   return fetch("/api/sequencer", {
     method: "POST",

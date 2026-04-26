@@ -104,7 +104,7 @@ The layout fills the available UI area as a mosaic:
 
 Supported control fields:
 
-- `type`: optional, `slider`, `lfo`, `keyboard`, `button`, `tempo`, `sequencer`, `memory`, or `mutator`, defaults to `slider`; `lfo` is kept as a compatibility alias for a slider that opens in the LFO controls
+- `type`: optional, `slider`, `lfo`, `keyboard`, `button`, `curve`, `tempo`, `sequencer`, `memory`, or `mutator`, defaults to `slider`; `lfo` is kept as a compatibility alias for a slider that opens in the LFO controls
 - `name`
 - `color`: any CSS color string or a name from the root `palette`, optional when inherited from a parent container
 - `show_label`: optional boolean, defaults to `true`; set `false` to hide the control title and MIDI/OSC metadata, may be inherited from a parent container
@@ -138,6 +138,16 @@ Supported slider fields:
 - depth, rate, waveform, and jitter are remembered in browser storage per control key
 - in `complex: true` mode, the top-left panel sets the LFO midpoint and shows live movement, top-right controls depth, bottom-left controls speed, and bottom-right controls waveform or jitter
 - jitter blends between the selected LFO waveform and a smoothed random motion, where `0` is pure LFO and `1` is pure jitter
+
+Supported curve fields:
+
+- `type: curve`
+- `control` from `0` to `127`
+- `length`: positive number of seconds represented by the curve
+- `mode`: optional `loop` or `trigger`, defaults to `loop`; loop mode continuously plays with a visible playhead until stopped, trigger mode runs once per play
+- `default`, `min`, `max`: optional MIDI/OSC value range fields; `initial` is accepted as a compatibility alias for `default`
+- `osc`: optional per-curve OSC mapping using the same `osc.path`, `osc.min`, and `osc.max` fields as sliders
+- use `Play` / `Stop` to control playback, click the canvas to add a point, drag points to edit them, double-click a non-start point to remove it, and use `Clear` to return to the initial horizontal line
 
 Supported keyboard fields:
 

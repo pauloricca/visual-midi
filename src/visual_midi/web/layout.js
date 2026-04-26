@@ -1,4 +1,5 @@
 import { renderButton } from "./controls/button.js";
+import { renderCurve } from "./controls/curve.js";
 import { renderKeyboard } from "./controls/keyboard.js";
 import { renderLfo } from "./controls/lfo.js";
 import { renderMemory } from "./controls/memory.js";
@@ -19,6 +20,9 @@ export function renderLayoutWithConfig(node, payload) {
   }
   if (node.type === "button") {
     return renderButton(node);
+  }
+  if (node.type === "curve") {
+    return renderCurve(node);
   }
   if (node.type === "tempo") {
     return renderTempo(node);

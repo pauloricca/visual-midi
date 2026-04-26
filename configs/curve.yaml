@@ -1,0 +1,41 @@
+output: IAC Driver Bus 1
+inertia: 2
+palette:
+  orange: "#d26a2e"
+  moss: "#5f8f6b"
+  clay: "#b85d45"
+  slate: "#5077b5"
+  sand: "#c8a76a"
+  plum: "#8a5a7c"
+  teal: "#4f8f88"
+# palette:
+#   orange: "black"
+#   moss: "black"
+#   clay: "black"
+#   slate: "black"
+#   sand: "black"
+#   plum: "black"
+#   teal: "black"
+quantize_speed: true
+rows:
+  - name: Frequency
+    type: curve
+    channel: 1
+    control: 3
+    color: orange
+    length: 0.5
+    mode: loop
+  - name: Amplitude
+    type: curve
+    channel: 1
+    control: 1
+    color: sand
+    length: 1
+    mode: loop
+  - name: Fold
+    type: curve
+    channel: 1
+    control: 2
+    color: plum
+    length: 0.77
+    mode: loop

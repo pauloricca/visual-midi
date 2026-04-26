@@ -241,6 +241,7 @@
         { "$ref": "#/definitions/lfoControl" },
         { "$ref": "#/definitions/keyboardControl" },
         { "$ref": "#/definitions/buttonControl" },
+        { "$ref": "#/definitions/curveControl" },
         { "$ref": "#/definitions/tempoControl" },
         { "$ref": "#/definitions/sequencerControl" },
         { "$ref": "#/definitions/memoryControl" },
@@ -543,6 +544,46 @@
             },
             "control": {
               "$ref": "#/definitions/midiControl"
+            },
+            "osc": {
+              "$ref": "#/definitions/oscRoute"
+            }
+          }
+        }
+      ]
+    },
+    "curveControl": {
+      "allOf": [
+        { "$ref": "#/definitions/controlBase" },
+        { "$ref": "#/definitions/channelMessageBase" },
+        {
+          "type": "object",
+          "required": ["type", "control", "length"],
+          "properties": {
+            "type": {
+              "const": "curve"
+            },
+            "control": {
+              "$ref": "#/definitions/midiControl"
+            },
+            "length": {
+              "$ref": "#/definitions/positiveNumber"
+            },
+            "mode": {
+              "type": "string",
+              "enum": ["loop", "trigger"]
+            },
+            "initial": {
+              "$ref": "#/definitions/midiValue"
+            },
+            "default": {
+              "$ref": "#/definitions/midiValue"
+            },
+            "min": {
+              "$ref": "#/definitions/midiValue"
+            },
+            "max": {
+              "$ref": "#/definitions/midiValue"
             },
             "osc": {
               "$ref": "#/definitions/oscRoute"

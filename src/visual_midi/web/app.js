@@ -4,6 +4,7 @@ import { renderLayoutWithConfig } from "./layout.js";
 import { clearSequencerViews, syncTransportState } from "./controls/sequencer.js";
 import { clearLfoViews, syncLfoTransportState } from "./controls/lfo.js";
 import { clearTempoViews, installTempoShortcuts } from "./controls/tempo.js";
+import { clearCurveViews } from "./controls/curve.js";
 
 let currentVersion = null;
 let pollTimer = null;
@@ -36,6 +37,7 @@ function applyPayload(payload, options = {}) {
   clearSequencerViews();
   clearLfoViews();
   clearTempoViews();
+  clearCurveViews();
   layoutRoot.replaceChildren(renderLayoutWithConfig(renderPayload.layout, renderPayload));
   syncTransportState(payload.transport, { resetAnchors: true });
   syncLfoTransportState(payload.transport);

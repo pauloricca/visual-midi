@@ -563,6 +563,89 @@ a,
   white-space: pre-line;
 }
 
+.curve-control {
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--curve-accent) 18%, white);
+  border: 2px solid black;
+  touch-action: none;
+}
+
+.curve-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.curve-chrome {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: stretch;
+  padding: 8px;
+  pointer-events: none;
+}
+
+.curve-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  pointer-events: auto;
+}
+
+.curve-action-button {
+  appearance: none;
+  border: 2px solid black;
+  border-radius: 0;
+  background: color-mix(in srgb, var(--curve-accent) 22%, white);
+  color: black;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 800;
+  line-height: 1;
+  min-width: 64px;
+  min-height: 34px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.curve-action-button--primary,
+.curve-control.is-playing .curve-action-button--primary {
+  background: color-mix(in srgb, var(--curve-accent) 80%, white);
+}
+
+.curve-label {
+  align-self: flex-start;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  max-width: min(320px, 75%);
+  pointer-events: none;
+}
+
+.curve-title {
+  font-size: clamp(1rem, 2vw, 1.7rem);
+  font-weight: 700;
+  line-height: 1;
+  color: black;
+}
+
+.curve-meta {
+  color: black;
+  opacity: 0.34;
+  font-size: clamp(0.7rem, 1.1vw, 0.95rem);
+  line-height: 1.15;
+  white-space: pre-line;
+  margin-bottom: 8px;
+}
+
 .tempo-control {
   min-width: 0;
   min-height: 0;
