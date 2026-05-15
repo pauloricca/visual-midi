@@ -20,96 +20,96 @@ palette:
 #   plum: "black"
 #   teal: "black"
 quantize_speed: true
-rows:
-  - columns:
-    - rows:
+column:
+  - row:
+    - column:
         - name: Filter cutoff
-          channel: 1
+          channel: 0
           control: 1
           default: 64
           color: sand
           osc:
             path: /waves/a/freq
-            min: 20
+            min: 0
             max: 20000
-    - rows:
-        - type: lfo
+    - column:
+        - type: slider
           name: Fold
           complex: true
-          channel: 1
+          channel: 0
           control: 11
           color: orange
-    - rows:
+    - column:
         - name: Fold bias
-          channel: 1
+          channel: 0
           control: 21
           default: 64
           color: slate
     - tabs:
         - tab:
             name: Buttons
-            rows:
+            column:
               - type: button
                 name: Button A
-                channel: 1
+                channel: 0
                 control: 31
                 default: 64
                 color: clay
               - type: button
                 name: Button B
-                channel: 1
+                channel: 0
                 control: 31
                 default: 64
                 color: orange
               - type: button
                 name: Button C
-                channel: 1
+                channel: 0
                 control: 31
                 default: 64
                 color: plum
         - tab:
             name: Sliders
-            rows:
+            column:
               - name: Freq E
-                channel: 1
+                channel: 0
                 control: 41
                 default: 64
                 color: plum
-              - rows:
+              - column:
                   - name: Amp E
-                    channel: 1
+                    channel: 0
                     control: 42
                     default: 32
                     color: plum
                     orientation: horizontal
                   - name: LFO E
-                    channel: 1
+                    channel: 0
                     control: 43
                     default: 24
                     color: moss
                     orientation: horizontal
         - tab:
             name: Sliders
-            rows:
+            column:
               - name: Freq E
-                channel: 1
+                channel: 0
                 control: 41
                 default: 64
                 color: plum
-              - rows:
+              - column:
                   - name: Amp E
-                    channel: 1
+                    channel: 0
                     control: 42
                     default: 32
                     color: plum
                     orientation: horizontal
                   - name: LFO E
-                    channel: 1
+                    channel: 0
                     control: 43
                     default: 24
                     color: moss
                     orientation: horizontal
-  - rows:
+  - column:
     - name: Sequences
       type: memory
       target: sequencers
@@ -119,12 +119,12 @@ rows:
       color: orange
     - name: sequencers
       width: 30%
-      rows:
+      column:
         - type: sequencer
           name: Bass Seq
           mode: notes
           # control: 3
-          channel: 1
+          channel: 0
           size: 8
           subdivision: 1/8
           root: C2
@@ -134,7 +134,7 @@ rows:
           name: Mid Seq
           mode: notes
           # control: 3
-          channel: 1
+          channel: 0
           size: 32
           subdivision: 1/8
           root: C4
@@ -144,7 +144,7 @@ rows:
           show_gate: true
           show_timing: true
   - height: 20%
-    columns:
+    row:
       - type: tempo
         name: Tempo
         width: 18%

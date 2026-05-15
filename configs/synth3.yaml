@@ -12,10 +12,10 @@ palette:
   plum: "#8a5a7c"
   teal: "#4f8f88"
 quantize_speed: true
-columns:
+row:
   - name: base freq
     control: 15
-  - rows:
+  - column:
       - name: amp 1
         control: 0
       - name: freq 1
@@ -25,7 +25,7 @@ columns:
           path: freq1
           min: 0
           max: 2000
-  - rows:
+  - column:
       - name: amp 2
         control: 1
       - name: freq 2
@@ -35,7 +35,7 @@ columns:
           path: freq2
           min: 0
           max: 2000
-  - rows:
+  - column:
       - name: amp 3
         control: 2
       - name: freq 3
@@ -45,7 +45,7 @@ columns:
           path: freq3
           min: 0
           max: 2000
-  - rows:
+  - column:
       - name: amp 4
         control: 3
       - name: freq 4
@@ -55,7 +55,7 @@ columns:
           path: freq4
           min: 0
           max: 2000
-  - rows:
+  - column:
       - name: amp 5
         control: 4
       - name: freq 5
@@ -65,7 +65,7 @@ columns:
           path: freq5
           min: 0
           max: 2000
-  - rows:
+  - column:
       - name: amp 6
         control: 5
       - name: freq 6
@@ -75,7 +75,7 @@ columns:
           path: freq6
           min: 0
           max: 2000
-  - rows:
+  - column:
       - name: amp 7
         control: 6
       - name: freq 7
@@ -85,7 +85,7 @@ columns:
           path: freq7
           min: 0
           max: 2000
-  - rows:
+  - column:
       - name: amp 8
         control: 7
       - name: freq 8

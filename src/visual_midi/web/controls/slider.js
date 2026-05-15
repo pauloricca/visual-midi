@@ -1,5 +1,7 @@
 import { postSliderValue } from "../api.js";
 import { createSlider } from "../ui/slider.js";
+import { setDynamicControlValue } from "../utils/dynamic.js";
+import { formatRange } from "../utils/format.js";
 import { applyNodeSizing } from "../utils/layout.js";
 
 export function renderSlider(node) {
@@ -12,6 +14,7 @@ export function renderSlider(node) {
   };
 
   const initialValue = Number.isFinite(node.transitionFrom) ? node.transitionFrom : node.value;
+  setDynamicControlValue(node, initialValue);
   const slider = createSlider({
     tagName: "article",
     className: `control control--${node.orientation}`,
@@ -28,6 +31,7 @@ export function renderSlider(node) {
     wheelMode: "legacy",
     ariaLabel: node.name,
     onChange: (value) => {
+      setDynamicControlValue(state, value);
       stopSliderVisualTransition(state);
       queueSliderUpdate(state, value);
     },
@@ -103,10 +107,13 @@ function stopSliderVisualTransition(state) {
 }
 
 function buildSliderMeta(node) {
-  const parts = [`CH ${node.channel}  CC ${node.control}`];
+  const parts = [];
+  if (Number.isInteger(node.control)) {
+    parts.push(`CH ${node.channel}  CC ${node.control}`);
+  }
   if (node.osc) {
     parts.push(`OSC ${node.osc.path}`);
-    parts.push(`OSC Range ${node.osc.min}..${node.osc.max}`);
+    parts.push(`OSC Range ${formatRange(node.osc.min, node.osc.max)}`);
   }
   return parts.join("\n");
 }

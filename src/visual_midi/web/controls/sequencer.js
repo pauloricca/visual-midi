@@ -15,6 +15,7 @@ const transportState = {
   playing: false,
 };
 const GATE_STEP = 0.05;
+const NOTES_STEP_DRAG_SPEED = 0.2;
 
 export function renderSequencer(node) {
   const wrapper = document.createElement("article");
@@ -61,7 +62,7 @@ export function renderSequencer(node) {
       value: quantizeSequencerValue(node, Number(step.value)),
       velocity: normalizeSequencerVelocity(step.velocity, defaultSequencerVelocity(node)),
       gate: normalizeSequencerGate(node, step.gate),
-      timing: normalizeSequencerTiming(step.timing, defaultSequencerTiming(node)),
+      timing: normalizeSequencerTiming(node, step.timing, defaultSequencerTiming(node)),
     })),
     stepElements: [],
     velocityElements: [],
@@ -75,9 +76,10 @@ export function renderSequencer(node) {
       className: "sequencer-step",
       fillClassName: "sequencer-step-fill",
       value: step.value,
-      min: state.min,
-      max: state.max,
-      steps: Math.max(2, Math.round(state.max - state.min) + 1),
+      min: getSequencerStepMin(state),
+      max: getSequencerStepMax(state),
+      steps: getSequencerStepCount(state),
+      speed: getSequencerStepSpeed(state),
       orientation: "vertical",
       color: node.color || "#d26a2e",
       wheelAxis: "vertical",
@@ -124,7 +126,7 @@ export function renderSequencer(node) {
     });
   }
 
-  if (state.mode === "notes" && state.gateRow) {
+  if (isNoteSequencer(state) && state.gateRow) {
     renderSequencerParamRow({
       state,
       parent: editor,
@@ -141,7 +143,7 @@ export function renderSequencer(node) {
     });
   }
 
-  if (state.mode === "notes" && state.timingRow) {
+  if (isNoteSequencer(state) && state.timingRow) {
     renderSequencerParamRow({
       state,
       parent: editor,
@@ -149,11 +151,11 @@ export function renderSequencer(node) {
       label: "timing",
       shortLabel: "t",
       elements: state.timingElements,
-      normalizeValue: normalizeSequencerTiming,
+      normalizeValue: (value) => normalizeSequencerTiming(state, value),
       resetValue: () => defaultSequencerTiming(state),
-      min: -1,
-      max: 1,
-      steps: 201,
+      min: -getSequencerTimingMax(state),
+      max: getSequencerTimingMax(state),
+      steps: Math.max(2, Math.round(getSequencerTimingMax(state) * 200) + 1),
       orientation: "horizontal",
     });
   }
@@ -198,12 +200,14 @@ export function clearSequencerViews() {
 }
 
 function buildSequencerMeta(node) {
-  const parts = [`STEP ${node.subdivision}`];
+  const parts = node.mode === "note" ? [] : [`STEP ${node.subdivision}`];
   if (node.mode === "notes") {
     parts.unshift(`CH ${node.channel}  NOTES`);
     if (node.scale && Number.isInteger(node.root)) {
       parts.push(`${formatPitchClass(node.root)} ${formatScaleName(node.scale)}`);
     }
+  } else if (node.mode === "note") {
+    parts.unshift(`CH ${node.channel}  NOTE ${formatMidiNote(node.note)}`);
   } else {
     parts.unshift(`CH ${node.channel}`);
     if (Number.isInteger(node.control)) {
@@ -227,6 +231,7 @@ function updateSequencerStep(state, index, nextStep) {
     ),
     gate: normalizeSequencerGate(state, nextStep.gate ?? previous.gate),
     timing: normalizeSequencerTiming(
+      state,
       nextStep.timing ?? previous.timing,
       defaultSequencerTiming(state)
     ),
@@ -266,10 +271,16 @@ function formatSequencerValue(state, value, enabled) {
   if (state.mode === "notes") {
     return formatMidiNote(value);
   }
+  if (state.mode === "note") {
+    return "";
+  }
   return "";
 }
 
 function defaultSequencerValue(state) {
+  if (state.mode === "note") {
+    return defaultSequencerVelocity(state);
+  }
   if (state.mode === "notes" && Number.isInteger(state.root)) {
     return quantizeSequencerValue(state, state.root);
   }
@@ -277,6 +288,26 @@ function defaultSequencerValue(state) {
     return quantizeSequencerValue(state, 60);
   }
   return quantizeSequencerValue(state, (state.min + state.max) / 2);
+}
+
+function isNoteSequencer(state) {
+  return state.mode === "notes" || state.mode === "note";
+}
+
+function getSequencerStepMin(state) {
+  return state.mode === "note" ? 1 : state.min;
+}
+
+function getSequencerStepMax(state) {
+  return state.mode === "note" ? 127 : state.max;
+}
+
+function getSequencerStepCount(state) {
+  return Math.max(2, Math.round(getSequencerStepMax(state) - getSequencerStepMin(state)) + 1);
+}
+
+function getSequencerStepSpeed(state) {
+  return state.mode === "notes" ? NOTES_STEP_DRAG_SPEED : 1;
 }
 
 function queueSequencerUpdate(state) {
@@ -304,7 +335,7 @@ async function flushSequencerUpdate(state) {
         value: quantizeSequencerValue(state, Number(step.value)),
         velocity: normalizeSequencerVelocity(step.velocity, defaultSequencerVelocity(state)),
         gate: normalizeSequencerGate(state, step.gate),
-        timing: normalizeSequencerTiming(step.timing, defaultSequencerTiming(state)),
+        timing: normalizeSequencerTiming(state, step.timing, defaultSequencerTiming(state)),
       }));
       if (Number.isInteger(payload.currentStep)) {
         state.currentStep = payload.currentStep;
@@ -420,12 +451,13 @@ function normalizeSequencerGate(state, value) {
   return Math.round(Math.max(GATE_STEP, Math.min(maxGateSteps, numeric)) / GATE_STEP) * GATE_STEP;
 }
 
-function normalizeSequencerTiming(value, defaultValue = 0) {
+function normalizeSequencerTiming(state, value, defaultValue = 0) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) {
-    return defaultSequencerTiming({ defaultTiming: defaultValue });
+    return normalizeSequencerTiming(state, defaultValue, 0);
   }
-  return Math.round(Math.max(-1, Math.min(1, numeric)) * 100) / 100;
+  const timingMax = getSequencerTimingMax(state);
+  return Math.round(Math.max(-timingMax, Math.min(timingMax, numeric)) * 100) / 100;
 }
 
 function defaultSequencerVelocity(state) {
@@ -446,12 +478,17 @@ function defaultSequencerGate(state) {
 }
 
 function defaultSequencerTiming(state) {
-  return normalizeSequencerTiming(state.defaultTiming, 0);
+  return normalizeSequencerTiming(state, state.defaultTiming, 0);
 }
 
 function getSequencerMaxGateSteps(state) {
   const maxGateSteps = Number(state.maxGateSteps);
   return Number.isFinite(maxGateSteps) && maxGateSteps >= 1 ? maxGateSteps : 1;
+}
+
+function getSequencerTimingMax(state) {
+  const timingMax = Number(state.timingMax);
+  return Number.isFinite(timingMax) && timingMax >= 0 && timingMax <= 1 ? timingMax : 1;
 }
 
 function registerSequencerView(state) {

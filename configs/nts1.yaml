@@ -11,16 +11,16 @@ palette:
   arp: "#6f6a2d"
   motion: "#b04772"
   play: "#5f6d78"
-rows:
+column:
   - name: patch
     height: 72%
-    channel: 1
-    columns:
+    channel: 0
+    row:
       - tabs:
           - tab:
               name: Osc
-              rows:
-                - columns:
+              column:
+                - row:
                     - name: Osc Type
                       control: 53
                       default: 0
@@ -34,7 +34,7 @@ rows:
                       control: 55
                       default: 0
                       color: osc
-                - columns:
+                - row:
                     - name: Osc LFO Rate
                       control: 24
                       default: 0
@@ -45,8 +45,8 @@ rows:
                       color: motion
           - tab:
               name: Filter
-              rows:
-                - columns:
+              column:
+                - row:
                     - name: Filter Type
                       control: 42
                       default: 127
@@ -60,7 +60,7 @@ rows:
                       control: 44
                       default: 0
                       color: filter
-                - columns:
+                - row:
                     - name: Sweep Depth
                       control: 45
                       default: 63
@@ -72,8 +72,8 @@ rows:
       - tabs:
           - tab:
               name: EG
-              rows:
-                - columns:
+              column:
+                - row:
                     - name: EG Type
                       control: 14
                       default: 0
@@ -89,8 +89,8 @@ rows:
                       color: envelope
           - tab:
               name: Tremolo
-              rows:
-                - columns:
+              column:
+                - row:
                     - name: Tremolo Depth
                       control: 20
                       default: 0
@@ -101,8 +101,8 @@ rows:
                       color: motion
           - tab:
               name: Arp
-              rows:
-                - columns:
+              column:
+                - row:
                     - name: Arp Pattern
                       control: 117
                       default: 0
@@ -120,8 +120,8 @@ rows:
       - tabs:
           - tab:
               name: Mod
-              rows:
-                - columns:
+              column:
+                - row:
                     - name: Mod Type
                       control: 88
                       default: 0
@@ -137,8 +137,8 @@ rows:
                       color: fx
           - tab:
               name: Delay
-              rows:
-                - columns:
+              column:
+                - row:
                     - name: Delay Type
                       control: 89
                       default: 0
@@ -158,8 +158,8 @@ rows:
                       color: fx
           - tab:
               name: Reverb
-              rows:
-                - columns:
+              column:
+                - row:
                     - name: Reverb Type
                       control: 90
                       default: 0
@@ -178,7 +178,7 @@ rows:
                       default: 64
                       color: fx
   - height: 12%
-    columns:
+    row:
       - type: memory
         name: Patch Memories
         target: patch
@@ -192,8 +192,8 @@ rows:
         default: 120
         color: arp
   - height: 16%
-    channel: 1
-    columns:
+    channel: 0
+    row:
       - type: keyboard
         name: Keys
         show_label: false

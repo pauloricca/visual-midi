@@ -12,7 +12,7 @@ palette:
   plum: "#8a5a7c"
   teal: "#4f8f88"
 quantize_speed: true
-columns:
+row:
   - name: amp
     control: 3
   - name: hp cutoff

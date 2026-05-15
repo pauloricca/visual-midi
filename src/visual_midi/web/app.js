@@ -4,7 +4,8 @@ import { renderLayoutWithConfig } from "./layout.js";
 import { clearSequencerViews, syncTransportState } from "./controls/sequencer.js";
 import { clearLfoViews, syncLfoTransportState } from "./controls/lfo.js";
 import { clearTempoViews, installTempoShortcuts } from "./controls/tempo.js";
-import { clearCurveViews } from "./controls/curve.js";
+import { clearCurveViews, syncCurveTransportState } from "./controls/curve.js";
+import { resetDynamicControlValues, seedDynamicControlValuesFromLayout } from "./utils/dynamic.js";
 
 let currentVersion = null;
 let pollTimer = null;
@@ -38,15 +39,19 @@ function applyPayload(payload, options = {}) {
   clearLfoViews();
   clearTempoViews();
   clearCurveViews();
+  resetDynamicControlValues();
+  seedDynamicControlValuesFromLayout(renderPayload.layout);
   layoutRoot.replaceChildren(renderLayoutWithConfig(renderPayload.layout, renderPayload));
   syncTransportState(payload.transport, { resetAnchors: true });
   syncLfoTransportState(payload.transport);
+  syncCurveTransportState(payload.transport);
   applyQrPanel(payload);
   scheduleVersionPolling(payload.reloadPollMs);
   currentPayload = payload;
 }
 
 export async function loadApp() {
+  installInfoToggleShortcut();
   installTempoShortcuts();
   const payload = await fetchConfig();
   applyPayload(payload);
@@ -80,7 +85,7 @@ function clonePayload(payload) {
 }
 
 function collectContinuousValues(node, values = new Map()) {
-  if ((node.type === "slider" || node.type === "lfo") && node.key) {
+  if (node.type === "slider" && node.key) {
     values.set(node.key, Number(node.value));
     return values;
   }
@@ -95,7 +100,7 @@ function collectContinuousValues(node, values = new Map()) {
 }
 
 function annotateContinuousTransitions(node, previousValues, duration) {
-  if ((node.type === "slider" || node.type === "lfo") && node.key) {
+  if (node.type === "slider" && node.key) {
     const previousValue = previousValues.get(node.key);
     const nextValue = Number(node.value);
     if (Number.isFinite(previousValue) && Number.isFinite(nextValue) && previousValue !== nextValue) {
@@ -127,6 +132,31 @@ function scheduleVersionPolling(intervalMs) {
     } catch (_error) {
     }
   }, intervalMs);
+}
+
+function installInfoToggleShortcut() {
+  document.addEventListener(
+    "keydown",
+    (event) => {
+      if (event.repeat || event.key.toLowerCase() !== "h" || isEditableTarget(event.target)) {
+        return;
+      }
+      event.preventDefault();
+      document.documentElement.classList.toggle("show-control-meta");
+    },
+    { capture: true }
+  );
+}
+
+function isEditableTarget(target) {
+  if (!(target instanceof Element)) {
+    return false;
+  }
+  const editable = target.closest("input, textarea, select, [contenteditable]");
+  if (!editable) {
+    return false;
+  }
+  return editable.getAttribute("contenteditable") !== "false";
 }
 
 loadApp().catch((error) => {

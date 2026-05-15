@@ -10,14 +10,15 @@ export function clamp(value, minimum, maximum) {
 
 export function quantizeSliderValue(state, value) {
   const bounded = clamp(value, state.min, state.max);
-  if (!state.steps) {
+  const steps = Number(state.steps);
+  if (!Number.isFinite(steps) || steps < 2) {
     return bounded;
   }
   if (state.max === state.min) {
     return state.min;
   }
 
-  const stepSize = (state.max - state.min) / (state.steps - 1);
+  const stepSize = (state.max - state.min) / (steps - 1);
   const stepIndex = Math.round((bounded - state.min) / stepSize);
   return clamp(state.min + stepIndex * stepSize, state.min, state.max);
 }
@@ -91,14 +92,15 @@ export function computeWheelValueDelta(state, normalizedDelta) {
         ? -1
         : 1;
 
-  if (state.steps) {
+  const steps = Number(state.steps);
+  if (Number.isFinite(steps) && steps >= 2) {
     state.wheelRemainder += Math.abs(normalizedDelta);
     const stepCount = Math.floor(state.wheelRemainder / WHEEL_DELTA_UNIT);
     if (stepCount === 0) {
       return 0;
     }
     state.wheelRemainder -= stepCount * WHEEL_DELTA_UNIT;
-    const stepSize = (state.max - state.min) / (state.steps - 1);
+    const stepSize = (state.max - state.min) / (steps - 1);
     return stepSize * stepCount * directionMultiplier;
   }
 

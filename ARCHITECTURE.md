@@ -56,20 +56,22 @@ Current concepts:
 
 - `title`
 - `output`
-- `rows` / `columns` / `tabs`
+- `column` / `row` / `tabs`
 - `slider`
 - `keyboard`
 - `button`
+- `toggle`
 - `tempo`
 
 Layout is a tree of:
 
-- `rows`
-- `columns`
+- `column`
+- `row`
 - `tabs`
 - `slider`
 - `keyboard`
 - `button`
+- `toggle`
 - `tempo`
 
 Slider presentation fields may include:
@@ -87,8 +89,8 @@ Future additions should follow the same pattern:
 
 The current layout rule is mosaic-based:
 
-- each `rows` container divides height among its children
-- each `columns` container divides width among its children
+- each `column` container stacks children vertically and divides height among them
+- each `row` container places children side-by-side and divides width among them
 - each `tabs` container shows one named child panel at a time
 - explicit `%` or `px` sizes are allowed
 - unspecified siblings share the remaining space equally

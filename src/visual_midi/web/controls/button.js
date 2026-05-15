@@ -16,25 +16,32 @@ export function renderButton(node) {
   applyNodeSizing(wrapper, node);
 
   if (node.showLabel !== false) {
+    const metaText = buildButtonMeta(node);
     const meta = document.createElement("div");
     meta.className = "button-meta";
-    meta.textContent = buildButtonMeta(node);
+    meta.textContent = metaText;
 
     const title = document.createElement("div");
     title.className = "button-title";
     title.textContent = node.name;
 
-    wrapper.append(meta, title);
+    wrapper.append(...(metaText ? [meta] : []), title);
   }
 
   return wrapper;
 }
 
 function buildButtonMeta(node) {
-  const parts = [`CH ${node.channel}  CC ${node.control}`];
+  const parts = [];
+  if (Number.isInteger(node.control)) {
+    parts.push(`CH ${node.channel}  CC ${node.control}`);
+  }
   if (node.osc) {
     parts.push(`OSC ${node.osc.path}`);
     parts.push("OSC 0/1");
+  }
+  if (parts.length === 0) {
+    return "";
   }
   return parts.join("\n");
 }

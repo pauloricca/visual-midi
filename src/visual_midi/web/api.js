@@ -36,6 +36,14 @@ export async function postSliderValue(key, value) {
   });
 }
 
+export async function postLfoState(state) {
+  return fetch("/api/lfo", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(state),
+  });
+}
+
 export async function postCurveValue(key, value) {
   return fetch("/api/curve", {
     method: "POST",
@@ -90,6 +98,14 @@ export function sendKeyboardGate(key, note, gate) {
 
 export function sendButtonGate(key, gate) {
   void queueGateRequest(`button:${key}`, "/api/button", { key, gate });
+}
+
+export async function postToggleState(key, enabled) {
+  return fetch(apiUrl("/api/toggle"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key, enabled }),
+  });
 }
 
 function queueGateRequest(chainKey, url, payload) {

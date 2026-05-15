@@ -1,8 +1,10 @@
 import { postTempoValue, postTransportState } from "../api.js";
+import { installDynamicNumberAccessors, setDynamicControlValue } from "../utils/dynamic.js";
 import { WHEEL_DELTA_UNIT, clamp, normalizeWheelDelta, quantizeTempoValue } from "../utils/math.js";
 import { applyNodeSizing } from "../utils/layout.js";
 import { syncTransportState } from "./sequencer.js";
 import { syncLfoTransportState } from "./lfo.js";
+import { syncCurveTransportState } from "./curve.js";
 
 let currentTempoState = null;
 let tempoShortcutsInstalled = false;
@@ -49,6 +51,10 @@ export function renderTempo(node) {
     dragStartValue: node.value,
     wheelRemainder: 0,
   };
+  installDynamicNumberAccessors(state, {
+    min: { source: node.min, fallback: 20 },
+    max: { source: node.max, fallback: 300 },
+  });
   currentTempoState = state;
 
   updateTempoVisuals(state, node.value, node.playing);
@@ -143,6 +149,7 @@ export function installTempoShortcuts() {
 
 export function updateTempoVisuals(state, value, playing) {
   state.value = quantizeTempoValue(value);
+  setDynamicControlValue(state, state.value);
   state.playing = Boolean(playing);
   state.valueNode.textContent = state.value.toFixed(1);
   state.transportButton.setAttribute("aria-label", state.playing ? "Stop transport" : "Start transport");
@@ -188,6 +195,7 @@ async function flushTempoUpdate(state) {
       updateTempoVisuals(state, payload.value, payload.playing);
       syncTransportState({ tempo: payload.value, playing: payload.playing });
       syncLfoTransportState({ tempo: payload.value, playing: payload.playing });
+      syncCurveTransportState({ tempo: payload.value, playing: payload.playing });
     }
   } catch (_error) {
   } finally {
@@ -210,6 +218,7 @@ async function sendTransportState(state, playing) {
       updateTempoVisuals(state, state.value, payload.playing);
       syncTransportState({ tempo: state.value, playing: payload.playing });
       syncLfoTransportState({ tempo: state.value, playing: payload.playing });
+      syncCurveTransportState({ tempo: state.value, playing: payload.playing });
     }
   } catch (_error) {
   } finally {

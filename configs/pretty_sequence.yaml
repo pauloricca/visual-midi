@@ -11,11 +11,11 @@ palette:
   sand: "#c8a76a"
   plum: "#8a5a7c"
   teal: "#4f8f88"
-rows:
+column:
   - height: 70%
     color: orange
     steps: 25
-    columns:
+    row:
       - name: 1
         control: 10
       - name: 2
@@ -33,7 +33,7 @@ rows:
       - name: 8
         control: 80
   - color: plum
-    columns:
+    row:
       - name: A1
         control: 11
         default: 0

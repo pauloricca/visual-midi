@@ -1,0 +1,47 @@
+output: IAC Driver Bus 1
+inertia: 2
+osc:
+  host: 127.0.0.1
+  port: 9000
+palette:
+  orange: "#d26a2e"
+  moss: "#5f8f6b"
+  clay: "#b85d45"
+  slate: "#5077b5"
+  sand: "#c8a76a"
+  plum: "#8a5a7c"
+  teal: "#4f8f88"
+quantize_speed: true
+column:
+  - row:
+    - type: tempo
+      name: Tempo
+      min: 40
+      max: 240
+      default: 120
+      color: clay
+    - name: mod_b
+      control: 10
+      default: 1
+  - name: Sequences
+    type: memory
+    target: basic
+    slots: 8
+    transition: 1
+    height: 20%
+    color: orange
+  - type: sequencer
+    name: basic
+    mode: notes
+    channel: 1
+    size: 4
+    subdivision: 1/2
+    root: C2
+    scale: minor
+    color: moss
+    show_velocity: true
+    show_gate: true
+    show_timing: true
+    timing_max: 0.2
+    gate_max: 2
+    

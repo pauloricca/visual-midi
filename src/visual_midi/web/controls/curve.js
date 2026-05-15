@@ -1,4 +1,6 @@
 import { postCurveValue } from "../api.js";
+import { installDynamicNumberAccessors, resolveDynamicNumber, setDynamicControlValue } from "../utils/dynamic.js";
+import { formatRange } from "../utils/format.js";
 import { applyNodeSizing } from "../utils/layout.js";
 
 const STORAGE_PREFIX = "visual-midi:curve:";
@@ -6,6 +8,28 @@ const POINT_RADIUS = 8;
 const HIT_RADIUS = 14;
 const MIN_POINT_GAP = 0.001;
 const activeCurveStates = new Set();
+const transportState = {
+  tempo: 120,
+  playing: false,
+};
+
+export function syncCurveTransportState(nextTransport) {
+  const tempo = Number(nextTransport?.tempo);
+  if (Number.isFinite(tempo) && tempo > 0) {
+    transportState.tempo = tempo;
+  }
+  transportState.playing = Boolean(nextTransport?.playing);
+  for (const state of activeCurveStates) {
+    if (!isTransportControlledLoop(state)) {
+      continue;
+    }
+    if (transportState.playing && !state.playing) {
+      startCurve(state);
+    } else if (!transportState.playing && state.playing) {
+      stopCurve(state);
+    }
+  }
+}
 
 export function clearCurveViews() {
   for (const state of activeCurveStates) {
@@ -45,7 +69,11 @@ export function renderCurve(node) {
   clearButton.type = "button";
   clearButton.className = "curve-action-button";
   clearButton.textContent = "Clear";
-  actions.append(playButton, clearButton);
+  if (node.mode === "loop" && node.transportControlled) {
+    actions.append(clearButton);
+  } else {
+    actions.append(playButton, clearButton);
+  }
 
   chrome.append(actions);
   if (node.showLabel !== false) {
@@ -71,19 +99,27 @@ export function renderCurve(node) {
     element: wrapper,
     canvas,
     context: canvas.getContext("2d"),
-    points: loadPoints(node),
+    points: [],
     dragIndex: -1,
     dragPointerId: null,
     movedDuringDrag: false,
-    playhead: node.mode === "loop" ? 0 : null,
-    playing: node.mode === "loop",
-    startedAt: performance.now(),
+    playhead: node.mode === "loop" && (!node.transportControlled || Boolean(node.transport?.playing)) ? 0 : null,
+    playing: node.mode === "loop" && (!node.transportControlled || Boolean(node.transport?.playing)),
+    lengthSource: node.length,
+    lastFrameTime: performance.now(),
     requestFrame: null,
     pendingRequest: false,
     queuedValue: null,
     resizeObserver: null,
-    playButton,
+    playButton: node.mode === "loop" && node.transportControlled ? null : playButton,
   };
+  installDynamicNumberAccessors(state, {
+    min: { source: node.min, fallback: 0 },
+    max: { source: node.max, fallback: 127 },
+    default: { source: node.default, fallback: 0 },
+  });
+  setDynamicControlValue(state, state.default);
+  state.points = loadPoints(state);
 
   const resizeObserver = new ResizeObserver(() => drawCurve(state));
   state.resizeObserver = resizeObserver;
@@ -140,11 +176,13 @@ function initialPoints(node) {
 }
 
 function initialRatio(node) {
-  const defaultValue = Number.isFinite(Number(node.default)) ? Number(node.default) : Number(node.initial);
-  if (node.max === node.min) {
+  const minimum = Number(node.min);
+  const maximum = Number(node.max);
+  const defaultValue = Number(node.default);
+  if (maximum === minimum) {
     return 0;
   }
-  return clamp((defaultValue - node.min) / (node.max - node.min), 0, 1);
+  return clamp((defaultValue - minimum) / (maximum - minimum), 0, 1);
 }
 
 function collapseDuplicateTimes(points) {
@@ -266,7 +304,7 @@ function startCurve(state) {
     window.cancelAnimationFrame(state.requestFrame);
     state.requestFrame = null;
   }
-  state.startedAt = performance.now();
+  state.lastFrameTime = performance.now();
   state.playhead = 0;
   state.playing = true;
   state.element.classList.add("is-playing");
@@ -287,9 +325,11 @@ function stopCurve(state) {
 }
 
 function tickCurve(state, now) {
-  const lengthMs = Math.max(0.001, Number(state.length) || 1) * 1000;
-  const elapsed = now - state.startedAt;
-  let phase = elapsed / lengthMs;
+  const lengthMs = resolveCurveLengthSeconds(state) * 1000;
+  const elapsed = Math.max(0, now - state.lastFrameTime);
+  state.lastFrameTime = now;
+  const previousPhase = Number.isFinite(state.playhead) ? state.playhead : 0;
+  let phase = previousPhase + (elapsed / lengthMs);
 
   if (state.mode === "loop") {
     phase = phase % 1;
@@ -473,19 +513,66 @@ function findPointIndex(state, pointer) {
 }
 
 function buildCurveMeta(node) {
-  const parts = [`CH ${node.channel}  CC ${node.control}`, `${node.mode}  ${node.length}s`, `Range ${node.min}..${node.max}`];
+  const parts = [];
+  if (Number.isInteger(node.control)) {
+    parts.push(`CH ${node.channel}  CC ${node.control}`);
+  }
+  parts.push(`${node.mode}  ${node.length}s`, `Range ${formatRange(node.min, node.max)}`);
   if (node.osc) {
     parts.push(`OSC ${node.osc.path}`);
-    parts.push(`OSC Range ${node.osc.min}..${node.osc.max}`);
+    parts.push(`OSC Range ${formatRange(node.osc.min, node.osc.max)}`);
   }
   return parts.join("\n");
 }
 
+function resolveCurveLengthSeconds(state) {
+  const barSeconds = parseBarLengthSeconds(state.lengthSource);
+  if (Number.isFinite(barSeconds)) {
+    return Math.max(0.001, barSeconds);
+  }
+  return resolveDynamicNumber(state.lengthSource, 1, { min: 0.001 });
+}
+
+function parseBarLengthSeconds(source) {
+  if (typeof source !== "string") {
+    return Number.NaN;
+  }
+  const match = source.trim().toLowerCase().match(/^(\d+(?:\.\d+)?|\d+\s*\/\s*\d+)\s*bars?$/);
+  if (!match) {
+    return Number.NaN;
+  }
+  const bars = parseBarCount(match[1]);
+  if (!Number.isFinite(bars) || bars <= 0) {
+    return Number.NaN;
+  }
+  const bpm = Math.max(1, Number(transportState.tempo) || 120);
+  return bars * 4 * (60 / bpm);
+}
+
+function parseBarCount(raw) {
+  if (raw.includes("/")) {
+    const [numerator, denominator] = raw.split("/").map((part) => Number(part.trim()));
+    if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) {
+      return Number.NaN;
+    }
+    return numerator / denominator;
+  }
+  return Number(raw);
+}
+
 function updatePlayButton(state) {
+  if (!state.playButton) {
+    return;
+  }
   state.playButton.textContent = state.playing ? "Stop" : "Play";
 }
 
+function isTransportControlledLoop(state) {
+  return state.mode === "loop" && Boolean(state.transportControlled);
+}
+
 function queueCurveValue(state, value) {
+  setDynamicControlValue(state, value);
   state.queuedValue = value;
   if (state.pendingRequest) {
     return;

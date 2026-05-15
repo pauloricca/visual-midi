@@ -11,7 +11,7 @@ palette:
   sand: "#c8a76a"
   plum: "#8a5a7c"
   teal: "#4f8f88"
-columns:
+row:
   - name: A
     control: 16
   - name: B

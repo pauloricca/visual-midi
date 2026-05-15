@@ -17,24 +17,24 @@ palette:
 #   plum: "black"
 #   teal: "black"
 quantize_speed: true
-rows:
+column:
   - name: Frequency
     type: curve
-    channel: 1
+    channel: 0
     control: 3
     color: orange
     length: 0.5
     mode: loop
   - name: Amplitude
     type: curve
-    channel: 1
+    channel: 0
     control: 1
     color: sand
     length: 1
     mode: loop
   - name: Fold
     type: curve
-    channel: 1
+    channel: 0
     control: 2
     color: plum
     length: 0.77

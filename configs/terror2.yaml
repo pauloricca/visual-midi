@@ -1,0 +1,94 @@
+output: IAC Driver Bus 1
+inertia: 2
+osc:
+  host: 127.0.0.1
+  port: 9000
+palette:
+  orange: "#d26a2e"
+  moss: "#5f8f6b"
+  clay: "#b85d45"
+  slate: "#5077b5"
+  sand: "#c8a76a"
+  plum: "#8a5a7c"
+  teal: "#4f8f88"
+quantize_speed: true
+column:
+  - row:
+    - name: distortion
+      osc: { path: distortion, min: 1, max: 0 }
+    - name: fold
+      osc: { path: fold, min: 0, max: 1 }
+    - name: pound_freq_start
+      osc: { path: pound_freq_start, min: 0, max: 100 }
+    - name: pound_freq_end
+      osc: { path: pound_freq_end, min: 0, max: 100 }
+    - name: pound_amp
+      curve: 3
+      osc: { path: pound_amp, min: 0, max: 1 }
+    - name: pound_attack
+      osc: { path: pound_attack, min: 0, max: 1 }
+    - name: pound_release
+      osc: { path: pound_release, min: 0, max: 1 }
+  - name: pound_interval
+    type: curve
+    osc: { path: pound_interval, min: 0.1, max: 0.9 }
+    length: 5
+    mode: loop
+  - row:
+    - column:
+      - name: sample_start
+        orientation: horizontal
+        osc: { path: sample_start, min: 0, max: 1 }
+      - name: sample_end
+        orientation: horizontal
+        osc: { path: sample_end, min: 0, max: 1 }
+  - row:
+    - name: sample_speed
+      type: curve
+      min: 0
+      max: max_speed
+      osc: sample_speed
+      length: length
+      default: 1
+      mode: loop
+    - name: length
+      type: slider
+      width: 10%
+      default: 5
+      min: 0.1
+      max: 30
+    - name: max_speed
+      width: 10%
+      default: 1
+      min: 1
+      max: 3
+    - name: toggler
+      type: toggle
+      control: 2
+    - name: button
+      type: button
+      control: 2
+  - row:
+    - type: tempo
+      name: Tempo
+      width: 18%
+      min: 40
+      max: 240
+      default: 120
+      color: clay
+    - column:
+      - name: seq
+        type: sequencer
+        mode: note
+        note: C3
+        size: 16
+        subdivision: 1/8
+      - type: sequencer
+        name: Bass Seq
+        mode: notes
+        channel: 0
+        size: 8
+        subdivision: 1/8
+        root: C2
+        scale: minor
+        color: moss

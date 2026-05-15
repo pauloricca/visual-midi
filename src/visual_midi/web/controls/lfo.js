@@ -6,11 +6,15 @@ import {
   sliderValueToRatio,
 } from "../utils/math.js";
 import { applyNodeSizing } from "../utils/layout.js";
+import { installDynamicNumberAccessors, setDynamicControlValue } from "../utils/dynamic.js";
+import { formatRange } from "../utils/format.js";
 import { createSlider } from "../ui/slider.js";
+import { postLfoState } from "../api.js";
 import { queueSliderUpdate } from "./slider.js";
 
 const LFO_STORAGE_PREFIX = "visual-midi:lfo:";
 const LFO_RATE_MAX = 12;
+const LFO_TICK_MS = 16;
 const LFO_TAP_WINDOW_MS = 420;
 const LFO_TAP_MOVE_PX = 10;
 const LFO_TAP_MAX_MS = 280;
@@ -82,7 +86,7 @@ function renderUnifiedSlider(node) {
   const state = createLfoState(node, persisted, {
     element: wrapper,
     mode: null,
-    viewMode: node.type === "lfo" ? "lfo" : "slider",
+    viewMode: "slider",
     fill: null,
     title: null,
     meta: null,
@@ -92,7 +96,9 @@ function renderUnifiedSlider(node) {
     lastTapTime: 0,
     lastTapX: 0,
     lastTapY: 0,
+    tapCount: 0,
     pointerDownTime: 0,
+    ignoreNextTapEnd: false,
   });
 
   mountCurrentLfoView(state);
@@ -332,6 +338,8 @@ function createLfoState(node, persisted, extraState) {
     ...extraState,
     pendingRequest: false,
     queuedValue: null,
+    pendingLfoRequest: false,
+    queuedLfoState: null,
     lastSentValue: null,
     dragStartX: 0,
     dragStartY: 0,
@@ -347,12 +355,21 @@ function createLfoState(node, persisted, extraState) {
     noiseTarget: 0,
     noiseCountdown: 0,
     sampleHoldValue: (Math.random() * 2) - 1,
-    animationFrame: null,
+    animationTimer: null,
     visualTransitionFrame: null,
-    lastFrameTime: null,
+    lastTickTime: null,
     tempo: transportState.tempo,
     tempoDivisionBeats: persisted.tempoDivisionBeats,
   };
+  installDynamicNumberAccessors(state, {
+    min: { source: node.min, fallback: 0 },
+    max: { source: node.max, fallback: 127 },
+    steps: { source: node.steps, fallback: 0, min: 0, integer: true },
+    speed: { source: node.speed, fallback: 1, min: Number.MIN_VALUE },
+    curve: { source: node.curve, fallback: 0 },
+    maxSpeed: { source: node.maxSpeed, fallback: LFO_RATE_MAX, min: 0 },
+    inertia: { source: node.inertia, fallback: 0, min: 0 },
+  });
   if (shouldQuantizeLfoRate(state) && state.rate > 0) {
     const division = closestLfoTempoDivisionForRate(state.rate, state);
     state.tempoDivisionBeats = division.beats;
@@ -407,18 +424,7 @@ function createLfoPanel({ state, parameter, label }) {
 }
 
 function handleLfoPanelTap(state, event) {
-  const now = performance.now();
-  const isSecondTap =
-    now - state.lastTapTime < LFO_TAP_WINDOW_MS &&
-    pointerDistance(event.clientX, event.clientY, state.lastTapX, state.lastTapY) <= LFO_TAP_MOVE_PX;
-  if (isSecondTap) {
-    state.lastTapTime = 0;
-    toggleLfoControls(state);
-    return;
-  }
-  state.lastTapTime = now;
-  state.lastTapX = event.clientX;
-  state.lastTapY = event.clientY;
+  handleLfoTapGesture(state, event);
 }
 
 function updateSimpleLfoFromPointer(state, event) {
@@ -435,19 +441,16 @@ function updateSimpleLfoFromPointer(state, event) {
 }
 
 function consumeLfoToggleGesture(state, event) {
-  const now = performance.now();
-  const isSecondTap =
-    now - state.lastTapTime < LFO_TAP_WINDOW_MS &&
-    pointerDistance(event.clientX, event.clientY, state.lastTapX, state.lastTapY) <= LFO_TAP_MOVE_PX;
-  if (!isSecondTap) {
+  const action = recordLfoTapGesture(state, event);
+  if (action === "none") {
     return false;
   }
 
-  state.lastTapTime = 0;
   if (event.currentTarget?.hasPointerCapture?.(event.pointerId)) {
     event.currentTarget.releasePointerCapture(event.pointerId);
   }
-  toggleLfoControls(state);
+  state.ignoreNextTapEnd = true;
+  applyLfoTapAction(state, action);
   return true;
 }
 
@@ -474,15 +477,52 @@ function rememberTapGesture(state, event) {
   if (event.type !== "pointerup") {
     return;
   }
+  if (state.ignoreNextTapEnd) {
+    state.ignoreNextTapEnd = false;
+    return;
+  }
   const now = performance.now();
   const duration = now - state.pointerDownTime;
   const moved = pointerDistance(event.clientX, event.clientY, state.dragStartX, state.dragStartY);
   if (duration > LFO_TAP_MAX_MS || moved > LFO_TAP_MOVE_PX) {
     return;
   }
+  handleLfoTapGesture(state, event);
+}
+
+function handleLfoTapGesture(state, event) {
+  applyLfoTapAction(state, recordLfoTapGesture(state, event));
+}
+
+function recordLfoTapGesture(state, event) {
+  const now = performance.now();
+  const isConsecutiveTap =
+    now - state.lastTapTime < LFO_TAP_WINDOW_MS &&
+    pointerDistance(event.clientX, event.clientY, state.lastTapX, state.lastTapY) <= LFO_TAP_MOVE_PX;
+  state.tapCount = isConsecutiveTap ? state.tapCount + 1 : 1;
   state.lastTapTime = now;
   state.lastTapX = event.clientX;
   state.lastTapY = event.clientY;
+
+  if (state.tapCount >= 3) {
+    state.tapCount = 0;
+    state.lastTapTime = 0;
+    return "reset";
+  }
+  if (state.tapCount === 2) {
+    return "toggle";
+  }
+  return "none";
+}
+
+function applyLfoTapAction(state, action) {
+  if (action === "reset") {
+    resetLfoState(state);
+    return;
+  }
+  if (action === "toggle") {
+    toggleLfoControls(state);
+  }
 }
 
 function pointerDistance(x1, y1, x2, y2) {
@@ -525,6 +565,39 @@ function toggleLfoControls(state) {
   syncLfoAnimationState(state);
 }
 
+function resetLfoState(state) {
+  const defaultValue = defaultSliderValue(state);
+  const defaultWaveform = getLfoWaveforms(state)[0];
+  stopLfoAnimation(state);
+  stopLfoVisualTransition(state);
+  stopSliderInertia(state);
+  state.midpoint = defaultValue;
+  state.depth = 0;
+  state.rate = 0;
+  state.tempoDivisionBeats = 1;
+  state.waveform = defaultWaveform;
+  state.jitter = 0;
+  state.phase = 0;
+  state.noiseValue = 0;
+  state.noiseTarget = 0;
+  state.noiseCountdown = 0;
+  state.sampleHoldValue = (Math.random() * 2) - 1;
+  updateLfoVisuals(state, defaultValue);
+  state.lastSentValue = defaultValue;
+  queueSliderUpdate(state, defaultValue);
+  saveLfoSettings(state);
+  syncLfoAnimationState(state);
+}
+
+function defaultSliderValue(state) {
+  const value = Number(state.default);
+  const fallback = Number.isFinite(Number(state.value)) ? Number(state.value) : state.min;
+  return quantizeSliderValue(
+    state,
+    clamp(Number.isFinite(value) ? value : fallback, state.min, state.max)
+  );
+}
+
 function setSliderMidpoint(state, rawValue) {
   const nextMidpoint = quantizeSliderValue(state, clamp(rawValue, state.min, state.max));
   if (nextMidpoint === state.midpoint) {
@@ -561,6 +634,7 @@ function syncInactiveLfoOutput(state) {
 }
 
 function syncLfoAnimationState(state) {
+  queueLfoStateUpdate(state);
   if (!isLfoActive(state)) {
     stopLfoAnimation(state);
     syncInactiveLfoOutput(state);
@@ -570,15 +644,16 @@ function syncLfoAnimationState(state) {
 }
 
 function stopLfoAnimation(state) {
-  if (state.animationFrame !== null) {
-    window.cancelAnimationFrame(state.animationFrame);
-    state.animationFrame = null;
+  if (state.animationTimer !== null) {
+    window.clearInterval(state.animationTimer);
+    state.animationTimer = null;
   }
-  state.lastFrameTime = null;
+  state.lastTickTime = null;
 }
 
 function updateLfoVisuals(state, value) {
   state.value = value;
+  setDynamicControlValue(state, value);
   if (state.mode === "slider") {
     if (state.title) {
       state.title.textContent = state.name;
@@ -606,13 +681,16 @@ function updateLfoVisuals(state, value) {
 }
 
 function buildSliderMeta(node) {
-  const parts = [`CH ${node.channel}  CC ${node.control}`];
+  const parts = [];
+  if (Number.isInteger(node.control)) {
+    parts.push(`CH ${node.channel}  CC ${node.control}`);
+  }
   if (isLfoActive(node)) {
     parts.push(`LFO ${Math.round(node.depth * 100)}% ${formatLfoSpeedLabel(node)}`);
   }
   if (node.osc) {
     parts.push(`OSC ${node.osc.path}`);
-    parts.push(`OSC Range ${node.osc.min}..${node.osc.max}`);
+    parts.push(`OSC Range ${formatRange(node.osc.min, node.osc.max)}`);
   }
   return parts.join("\n");
 }
@@ -664,11 +742,11 @@ function buildLfoMeta(node) {
   const rateLabel = shouldQuantizeLfoRate(node)
     ? `${currentLfoTempoDivision(node).label} @ ${formatTempo(node.tempo)} BPM`
     : `${node.rate.toFixed(2)} Hz`;
-  const parts = [
-    `CH ${node.channel}  CC ${node.control}`,
-    `DEPTH ${Math.round(node.depth * 100)}%`,
-    `RATE ${rateLabel}`,
-  ];
+  const parts = [];
+  if (Number.isInteger(node.control)) {
+    parts.push(`CH ${node.channel}  CC ${node.control}`);
+  }
+  parts.push(`DEPTH ${Math.round(node.depth * 100)}%`, `RATE ${rateLabel}`);
   if (shouldUseWaveformControl(node)) {
     parts.push(`WAVE ${formatWaveformName(currentLfoWaveform(node))}`);
   }
@@ -990,15 +1068,16 @@ function getLfoShapeValue(state) {
 }
 
 function startLfoAnimation(state) {
-  if (state.animationFrame !== null || !isLfoActive(state)) {
+  if (state.animationTimer !== null || !isLfoActive(state)) {
     return;
   }
-  const tick = (now) => {
-    if (state.lastFrameTime === null) {
-      state.lastFrameTime = now;
+  const tick = () => {
+    const now = performance.now();
+    if (state.lastTickTime === null) {
+      state.lastTickTime = now;
     }
-    const elapsedSeconds = Math.max((now - state.lastFrameTime) / 1000, 0);
-    state.lastFrameTime = now;
+    const elapsedSeconds = Math.max((now - state.lastTickTime) / 1000, 0);
+    state.lastTickTime = now;
     if (state.rate > 0) {
       const previousPhase = state.phase;
       state.phase = (state.phase + elapsedSeconds * state.rate * Math.PI * 2) % (Math.PI * 2);
@@ -1031,25 +1110,26 @@ function startLfoAnimation(state) {
     }
     if (nextValue !== state.lastSentValue) {
       state.lastSentValue = nextValue;
-      queueSliderUpdate(state, nextValue);
     }
 
-    if (isLfoActive(state)) {
-      state.animationFrame = window.requestAnimationFrame(tick);
-    } else {
-      state.animationFrame = null;
-      state.lastFrameTime = null;
+    if (!isLfoActive(state)) {
+      window.clearInterval(state.animationTimer);
+      state.animationTimer = null;
+      state.lastTickTime = null;
       syncInactiveLfoOutput(state);
     }
   };
 
-  state.animationFrame = window.requestAnimationFrame(tick);
+  tick();
+  if (isLfoActive(state)) {
+    state.animationTimer = window.setInterval(tick, LFO_TICK_MS);
+  }
 }
 
 function loadLfoSettings(node) {
   const defaultWaveform = getLfoWaveforms(node)[0];
-  const defaultDepth = node.type === "lfo" ? 0.35 : 0;
-  const defaultRate = node.type === "lfo" ? Math.min(1, getLfoRateMax(node)) : 0;
+  const defaultDepth = 0;
+  const defaultRate = 0;
   try {
     const raw = window.localStorage.getItem(`${LFO_STORAGE_PREFIX}${node.key}`);
     if (!raw) {
@@ -1109,5 +1189,41 @@ function saveLfoSettings(state) {
       })
     );
   } catch (_error) {
+  }
+  queueLfoStateUpdate(state);
+}
+
+function queueLfoStateUpdate(state) {
+  state.queuedLfoState = {
+    key: state.key,
+    midpoint: state.midpoint,
+    depth: state.depth,
+    rate: state.rate,
+    waveform: currentLfoWaveform(state),
+    jitter: state.jitter,
+  };
+  if (state.pendingLfoRequest) {
+    return;
+  }
+  void flushLfoStateUpdate(state);
+}
+
+async function flushLfoStateUpdate(state) {
+  if (state.queuedLfoState === null) {
+    return;
+  }
+
+  state.pendingLfoRequest = true;
+  const payload = state.queuedLfoState;
+  state.queuedLfoState = null;
+
+  try {
+    await postLfoState(payload);
+  } catch (_error) {
+  } finally {
+    state.pendingLfoRequest = false;
+    if (state.queuedLfoState !== null) {
+      void flushLfoStateUpdate(state);
+    }
   }
 }

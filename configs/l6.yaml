@@ -15,12 +15,12 @@ palette:
   eq: "#b04772"
   switch: "#6f6a2d"
   system: "#5f6d78"
-rows:
+column:
   - height: 84%
-    columns:
+    row:
       - name: Channel 1
-        channel: 1
-        rows:
+        channel: 0
+        column:
           - name: Ch 1 Level
             control: 1
             default: 0
@@ -30,7 +30,7 @@ rows:
             default: 64
             color: pan
             orientation: horizontal
-          - rows:
+          - column:
               - name: Ch 1 Aux 1
                 control: 19
                 default: 0
@@ -64,8 +64,8 @@ rows:
             control: 13
             color: switch
       - name: Channel 2
-        channel: 1
-        rows:
+        channel: 0
+        column:
           - name: Ch 2 Level
             control: 2
             default: 0
@@ -75,7 +75,7 @@ rows:
             default: 64
             color: pan
             orientation: horizontal
-          - rows:
+          - column:
               - name: Ch 2 Aux 1
                 control: 20
                 default: 0
@@ -109,8 +109,8 @@ rows:
             control: 14
             color: switch
       - name: Channel 3
-        channel: 1
-        rows:
+        channel: 0
+        column:
           - name: Ch 3 Level
             control: 3
             default: 0
@@ -120,7 +120,7 @@ rows:
             default: 64
             color: pan
             orientation: horizontal
-          - rows:
+          - column:
               - name: Ch 3 Aux 1
                 control: 21
                 default: 0
@@ -154,8 +154,8 @@ rows:
             control: 15
             color: switch
       - name: Channel 4
-        channel: 1
-        rows:
+        channel: 0
+        column:
           - name: Ch 4 Level
             control: 4
             default: 0
@@ -165,7 +165,7 @@ rows:
             default: 64
             color: pan
             orientation: horizontal
-          - rows:
+          - column:
               - name: Ch 4 Aux 1
                 control: 22
                 default: 0
@@ -199,8 +199,8 @@ rows:
             control: 16
             color: switch
       - name: Channel 5
-        channel: 1
-        rows:
+        channel: 0
+        column:
           - name: Ch 5 Level
             control: 5
             default: 0
@@ -210,7 +210,7 @@ rows:
             default: 64
             color: pan
             orientation: horizontal
-          - rows:
+          - column:
               - name: Ch 5 Aux 1
                 control: 23
                 default: 0
@@ -244,8 +244,8 @@ rows:
             control: 17
             color: switch
       - name: Channel 6
-        channel: 1
-        rows:
+        channel: 0
+        column:
           - name: Ch 6 Level
             control: 6
             default: 0
@@ -255,7 +255,7 @@ rows:
             default: 64
             color: pan
             orientation: horizontal
-          - rows:
+          - column:
               - name: Ch 6 Aux 1
                 control: 24
                 default: 0
@@ -289,8 +289,8 @@ rows:
             control: 18
             color: switch
   - height: 16%
-    channel: 1
-    columns:
+    channel: 0
+    row:
       - type: button
         name: Ch 3 Mono x2
         control: 62

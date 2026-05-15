@@ -7,13 +7,13 @@ palette:
   clay: "#b85d45"
   slate: "#5077b5"
   teal: "#4f8f88"
-rows:
+column:
   - name: root
-    rows:
+    column:
       - name: patch
         height: 50%
-        columns:
-          - rows:
+        row:
+          - column:
               - name: Cutoff
                 control: 1
                 default: 64
@@ -24,7 +24,7 @@ rows:
                 control: 11
                 default: 32
                 color: clay
-          - rows:
+          - column:
               - name: Fold
                 control: 11
                 default: 40
@@ -37,7 +37,7 @@ rows:
         name: Sequencer
         mode: notes
         # control: 3
-        channel: 1
+        channel: 0
         size: 16
         subdivision: 1/8
         root: C4
@@ -46,7 +46,7 @@ rows:
         show_velocity: true
         show_gate: true
         show_timing: true
-      - columns:
+      - row:
           - type: tempo
             name: Tempo
             width: 18%

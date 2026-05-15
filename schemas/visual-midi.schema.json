@@ -8,8 +8,8 @@
   "allOf": [
     {
       "oneOf": [
-        { "required": ["rows"] },
-        { "required": ["columns"] },
+        { "required": ["column"] },
+        { "required": ["row"] },
         { "required": ["tabs"] }
       ]
     }
@@ -39,10 +39,10 @@
     "palette": {
       "$ref": "#/definitions/palette"
     },
-    "rows": {
+    "column": {
       "$ref": "#/definitions/layoutChildren"
     },
-    "columns": {
+    "row": {
       "$ref": "#/definitions/layoutChildren"
     },
     "tabs": {
@@ -52,22 +52,22 @@
       "$ref": "#/definitions/midiChannel"
     },
     "default": {
-      "$ref": "#/definitions/midiValue"
+      "$ref": "#/definitions/controlValue"
     },
     "min": {
-      "$ref": "#/definitions/midiValue"
+      "$ref": "#/definitions/controlValue"
     },
     "max": {
-      "$ref": "#/definitions/midiValue"
+      "$ref": "#/definitions/controlValue"
     },
     "steps": {
       "$ref": "#/definitions/steps"
     },
     "speed": {
-      "$ref": "#/definitions/positiveNumber"
+      "$ref": "#/definitions/positiveNumberOrControl"
     },
     "curve": {
-      "$ref": "#/definitions/finiteNumber"
+      "$ref": "#/definitions/finiteNumberOrControl"
     },
     "quantize_speed": {
       "type": "boolean"
@@ -91,19 +91,54 @@
       "type": "number",
       "exclusiveMinimum": 0
     },
+    "positiveNumberOrControl": {
+      "oneOf": [
+        {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        {
+          "$ref": "#/definitions/nonEmptyString"
+        }
+      ]
+    },
     "nonNegativeNumber": {
       "type": "number",
       "minimum": 0
     },
+    "nonNegativeNumberOrControl": {
+      "oneOf": [
+        {
+          "type": "number",
+          "minimum": 0
+        },
+        {
+          "$ref": "#/definitions/nonEmptyString"
+        }
+      ]
+    },
+    "finiteNumberOrControl": {
+      "oneOf": [
+        {
+          "type": "number"
+        },
+        {
+          "$ref": "#/definitions/nonEmptyString"
+        }
+      ]
+    },
     "midiChannel": {
       "type": "integer",
-      "minimum": 1,
-      "maximum": 16
+      "minimum": 0,
+      "maximum": 15
     },
     "midiValue": {
       "type": "integer",
       "minimum": 0,
       "maximum": 127
+    },
+    "controlValue": {
+      "type": "number"
     },
     "midiControl": {
       "type": "integer",
@@ -208,22 +243,25 @@
       }
     },
     "oscRoute": {
-      "type": "object",
-      "required": ["path"],
-      "additionalProperties": false,
-      "properties": {
-        "path": {
-          "$ref": "#/definitions/nonEmptyString"
-        },
-        "min": {
-          "type": "number",
-          "default": 0
-        },
-        "max": {
-          "type": "number",
-          "default": 1
+      "oneOf": [
+        { "$ref": "#/definitions/nonEmptyString" },
+        {
+          "type": "object",
+          "required": ["path"],
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "$ref": "#/definitions/nonEmptyString"
+            },
+            "min": {
+              "$ref": "#/definitions/finiteNumberOrControl"
+            },
+            "max": {
+              "$ref": "#/definitions/finiteNumberOrControl"
+            }
+          }
         }
-      }
+      ]
     },
     "layoutChildren": {
       "type": "array",
@@ -234,13 +272,13 @@
     },
     "layoutNode": {
       "oneOf": [
-        { "$ref": "#/definitions/rowsContainer" },
-        { "$ref": "#/definitions/columnsContainer" },
+        { "$ref": "#/definitions/columnContainer" },
+        { "$ref": "#/definitions/rowContainer" },
         { "$ref": "#/definitions/tabsContainer" },
         { "$ref": "#/definitions/sliderControl" },
-        { "$ref": "#/definitions/lfoControl" },
         { "$ref": "#/definitions/keyboardControl" },
         { "$ref": "#/definitions/buttonControl" },
+        { "$ref": "#/definitions/toggleControl" },
         { "$ref": "#/definitions/curveControl" },
         { "$ref": "#/definitions/tempoControl" },
         { "$ref": "#/definitions/sequencerControl" },
@@ -261,22 +299,22 @@
           "$ref": "#/definitions/midiChannel"
         },
         "default": {
-          "$ref": "#/definitions/midiValue"
+          "$ref": "#/definitions/controlValue"
         },
         "min": {
-          "$ref": "#/definitions/midiValue"
+          "$ref": "#/definitions/controlValue"
         },
         "max": {
-          "$ref": "#/definitions/midiValue"
+          "$ref": "#/definitions/controlValue"
         },
         "steps": {
           "$ref": "#/definitions/steps"
         },
         "speed": {
-          "$ref": "#/definitions/positiveNumber"
+          "$ref": "#/definitions/positiveNumberOrControl"
         },
         "curve": {
-          "$ref": "#/definitions/finiteNumber"
+          "$ref": "#/definitions/finiteNumberOrControl"
         },
         "quantize_speed": {
           "type": "boolean"
@@ -298,28 +336,28 @@
         }
       }
     },
-    "rowsContainer": {
+    "columnContainer": {
       "allOf": [
         { "$ref": "#/definitions/containerBase" },
         {
           "type": "object",
-          "required": ["rows"],
+          "required": ["column"],
           "properties": {
-            "rows": {
+            "column": {
               "$ref": "#/definitions/layoutChildren"
             }
           }
         }
       ]
     },
-    "columnsContainer": {
+    "rowContainer": {
       "allOf": [
         { "$ref": "#/definitions/containerBase" },
         {
           "type": "object",
-          "required": ["columns"],
+          "required": ["row"],
           "properties": {
-            "columns": {
+            "row": {
               "$ref": "#/definitions/layoutChildren"
             }
           }
@@ -361,18 +399,18 @@
           "type": "object",
           "required": ["name"],
           "oneOf": [
-            { "required": ["rows"] },
-            { "required": ["columns"] },
+            { "required": ["column"] },
+            { "required": ["row"] },
             { "required": ["tabs"] }
           ],
           "properties": {
             "name": {
               "$ref": "#/definitions/nonEmptyString"
             },
-            "rows": {
+            "column": {
               "$ref": "#/definitions/layoutChildren"
             },
-            "columns": {
+            "row": {
               "$ref": "#/definitions/layoutChildren"
             },
             "tabs": {
@@ -419,28 +457,27 @@
     },
     "sliderFields": {
       "type": "object",
-      "required": ["control"],
       "properties": {
         "control": {
           "$ref": "#/definitions/midiControl"
         },
         "default": {
-          "$ref": "#/definitions/midiValue"
+          "$ref": "#/definitions/controlValue"
         },
         "min": {
-          "$ref": "#/definitions/midiValue"
+          "$ref": "#/definitions/controlValue"
         },
         "max": {
-          "$ref": "#/definitions/midiValue"
+          "$ref": "#/definitions/controlValue"
         },
         "steps": {
           "$ref": "#/definitions/steps"
         },
         "speed": {
-          "$ref": "#/definitions/positiveNumber"
+          "$ref": "#/definitions/positiveNumberOrControl"
         },
         "curve": {
-          "$ref": "#/definitions/finiteNumber"
+          "$ref": "#/definitions/finiteNumberOrControl"
         },
         "orientation": {
           "$ref": "#/definitions/orientation"
@@ -452,7 +489,7 @@
           "type": "boolean"
         },
         "max_speed": {
-          "$ref": "#/definitions/nonNegativeNumber"
+          "$ref": "#/definitions/nonNegativeNumberOrControl"
         },
         "quantize_speed": {
           "type": "boolean"
@@ -482,22 +519,6 @@
           "properties": {
             "type": {
               "enum": ["slider"]
-            }
-          }
-        }
-      ]
-    },
-    "lfoControl": {
-      "allOf": [
-        { "$ref": "#/definitions/controlBase" },
-        { "$ref": "#/definitions/channelMessageBase" },
-        { "$ref": "#/definitions/sliderFields" },
-        {
-          "type": "object",
-          "required": ["type"],
-          "properties": {
-            "type": {
-              "const": "lfo"
             }
           }
         }
@@ -537,7 +558,7 @@
         { "$ref": "#/definitions/channelMessageBase" },
         {
           "type": "object",
-          "required": ["type", "control"],
+          "required": ["type"],
           "properties": {
             "type": {
               "const": "button"
@@ -552,13 +573,43 @@
         }
       ]
     },
+    "toggleControl": {
+      "allOf": [
+        { "$ref": "#/definitions/controlBase" },
+        { "$ref": "#/definitions/channelMessageBase" },
+        {
+          "type": "object",
+          "required": ["type"],
+          "properties": {
+            "type": {
+              "const": "toggle"
+            },
+            "control": {
+              "$ref": "#/definitions/midiControl"
+            },
+            "default": {
+              "$ref": "#/definitions/controlValue"
+            },
+            "min": {
+              "$ref": "#/definitions/controlValue"
+            },
+            "max": {
+              "$ref": "#/definitions/controlValue"
+            },
+            "osc": {
+              "$ref": "#/definitions/oscRoute"
+            }
+          }
+        }
+      ]
+    },
     "curveControl": {
       "allOf": [
         { "$ref": "#/definitions/controlBase" },
         { "$ref": "#/definitions/channelMessageBase" },
         {
           "type": "object",
-          "required": ["type", "control", "length"],
+          "required": ["type"],
           "properties": {
             "type": {
               "const": "curve"
@@ -567,23 +618,20 @@
               "$ref": "#/definitions/midiControl"
             },
             "length": {
-              "$ref": "#/definitions/positiveNumber"
+              "$ref": "#/definitions/positiveNumberOrControl"
             },
             "mode": {
               "type": "string",
               "enum": ["loop", "trigger"]
             },
-            "initial": {
-              "$ref": "#/definitions/midiValue"
-            },
             "default": {
-              "$ref": "#/definitions/midiValue"
+              "$ref": "#/definitions/controlValue"
             },
             "min": {
-              "$ref": "#/definitions/midiValue"
+              "$ref": "#/definitions/finiteNumberOrControl"
             },
             "max": {
-              "$ref": "#/definitions/midiValue"
+              "$ref": "#/definitions/finiteNumberOrControl"
             },
             "osc": {
               "$ref": "#/definitions/oscRoute"
@@ -628,7 +676,7 @@
             },
             "mode": {
               "type": "string",
-              "enum": ["notes", "cc"]
+              "enum": ["notes", "note", "cc"]
             },
             "size": {
               "type": "integer",
@@ -645,6 +693,9 @@
             },
             "max": {
               "$ref": "#/definitions/midiValue"
+            },
+            "note": {
+              "$ref": "#/definitions/midiNote"
             },
             "root": {
               "$ref": "#/definitions/midiNote"
@@ -663,6 +714,16 @@
             "timing": {
               "type": "number",
               "minimum": -1,
+              "maximum": 1
+            },
+            "timing_max": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "max_timing": {
+              "type": "number",
+              "minimum": 0,
               "maximum": 1
             },
             "velocity_row": {

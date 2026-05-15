@@ -6,14 +6,12 @@ import { renderMemory } from "./controls/memory.js";
 import { renderMutator } from "./controls/mutator.js";
 import { renderSequencer } from "./controls/sequencer.js";
 import { renderTempo } from "./controls/tempo.js";
+import { renderToggle } from "./controls/toggle.js";
 import { applyGroupTracks, applyNodeSizing } from "./utils/layout.js";
 
 export function renderLayoutWithConfig(node, payload) {
   if (node.type === "slider") {
     return renderLfo({ ...node, inertia: payload.inertia });
-  }
-  if (node.type === "lfo") {
-    return renderLfo(node);
   }
   if (node.type === "keyboard") {
     return renderKeyboard(node);
@@ -21,8 +19,15 @@ export function renderLayoutWithConfig(node, payload) {
   if (node.type === "button") {
     return renderButton(node);
   }
+  if (node.type === "toggle") {
+    return renderToggle(node);
+  }
   if (node.type === "curve") {
-    return renderCurve(node);
+    return renderCurve({
+      ...node,
+      transportControlled: Boolean(payload.transportControlled),
+      transport: payload.transport,
+    });
   }
   if (node.type === "tempo") {
     return renderTempo(node);

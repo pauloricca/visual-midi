@@ -71,6 +71,9 @@ export function formatPitchClass(note) {
 }
 
 export function quantizeSequencerValue(state, value) {
+  if (state.mode === "note") {
+    return Math.round(clamp(value, 1, 127));
+  }
   const bounded = Math.round(clamp(value, state.min, state.max));
   if (state.mode !== "notes" || !state.scale || !Number.isInteger(state.root)) {
     return bounded;

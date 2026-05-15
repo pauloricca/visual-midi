@@ -44,6 +44,14 @@ a,
   -webkit-touch-callout: none;
 }
 
+:root:not(.show-control-meta) .control-meta,
+:root:not(.show-control-meta) .keyboard-meta,
+:root:not(.show-control-meta) .button-meta,
+:root:not(.show-control-meta) .curve-meta,
+:root:not(.show-control-meta) .sequencer-meta {
+  display: none;
+}
+
 .app-shell {
   min-height: var(--app-height);
   height: var(--app-height);
@@ -585,19 +593,23 @@ a,
   position: absolute;
   inset: 0;
   z-index: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  align-items: stretch;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr) auto;
   padding: 8px;
   pointer-events: none;
 }
 
 .curve-actions {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: start;
+  justify-self: end;
   display: flex;
   gap: 8px;
   justify-content: flex-end;
-  pointer-events: auto;
+  width: fit-content;
+  pointer-events: none;
 }
 
 .curve-action-button {
@@ -614,6 +626,7 @@ a,
   min-height: 34px;
   padding: 8px 10px;
   cursor: pointer;
+  pointer-events: auto;
 }
 
 .curve-action-button--primary,
@@ -622,7 +635,10 @@ a,
 }
 
 .curve-label {
-  align-self: flex-start;
+  grid-column: 1;
+  grid-row: 2;
+  align-self: end;
+  justify-self: start;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
@@ -932,7 +948,16 @@ a,
 }
 
 .sequencer-step.is-current {
+  box-shadow: none;
+}
+
+.sequencer-step.is-current::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 3;
   box-shadow: inset 0 0 0 4px black;
+  pointer-events: none;
 }
 
 .sequencer-step-fill {

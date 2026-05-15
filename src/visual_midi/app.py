@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from threading import Condition, Lock, Thread
+from threading import Condition, Event, Lock, Thread
 from typing import Any, Callable, Union
 from urllib.parse import parse_qs, urlparse
 
@@ -37,6 +37,7 @@ NOTE_BASES = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}
 SUBDIVISION_PATTERN = re.compile(r"^\s*(\d+)\s*/\s*(\d+)\s*$")
 LFO_WAVEFORMS = ("sine", "triangle", "square", "saw", "ramp", "random", "s&h")
 LFO_SHAPE_CONTROLS = ("waveform", "jitter")
+LFO_TICK_SECONDS = 0.016
 SCALE_PATTERNS = {
     "major": (0, 2, 4, 5, 7, 9, 11),
     "ionian": (0, 2, 4, 5, 7, 9, 11),
@@ -66,16 +67,19 @@ class SizeSpec:
     unit: str
 
 
+DynamicNumber = float | str
+
+
 @dataclass(frozen=True)
 class LayoutDefaults:
     output: str = ""
-    channel: int = 1
-    default: int = 0
-    minimum: int = 0
-    maximum: int = 127
+    channel: int = 0
+    default: float = 0.0
+    minimum: float = 0.0
+    maximum: float = 127.0
     steps: int | None = None
-    speed: float = 1.0
-    curve: float = 0.0
+    speed: DynamicNumber = 1.0
+    curve: DynamicNumber = 0.0
     quantize_speed_to_tempo_divisions: bool = False
     orientation: str = "vertical"
     color: str = "#d26a2e"
@@ -87,19 +91,19 @@ class SliderConfig:
     name: str
     output: str
     channel: int
-    control: int
+    control: int | None = None
     control_type: str = "slider"
     complex: bool = False
-    max_speed: float = 12.0
+    max_speed: DynamicNumber = 12.0
     quantize_speed_to_tempo_divisions: bool = False
     lfo_waveforms: tuple[str, ...] = LFO_WAVEFORMS
     lfo_shape_control: str = "waveform"
-    default: int = 0
-    minimum: int = 0
-    maximum: int = 127
+    default: float = 0.0
+    minimum: float = 0.0
+    maximum: float = 127.0
     steps: int | None = None
-    speed: float = 1.0
-    curve: float = 0.0
+    speed: DynamicNumber = 1.0
+    curve: DynamicNumber = 0.0
     orientation: str = "vertical"
     color: str = "#d26a2e"
     show_label: bool = True
@@ -109,7 +113,26 @@ class SliderConfig:
 
     @property
     def state_key(self) -> str:
+        if self.control is None:
+            return f"{self.control_type}:{self.name}"
         return f"ch{self.channel}:cc{self.control}:{self.name}"
+
+
+@dataclass
+class LfoRuntimeState:
+    state_key: str
+    midpoint: float
+    depth: float
+    rate: float
+    waveform: str
+    jitter: float
+    phase: float = 0.0
+    noise_value: float = 0.0
+    noise_target: float = 0.0
+    noise_countdown: float = 0.0
+    sample_hold_value: float = 0.0
+    last_tick_at: float | None = None
+    last_sent_value: float | None = None
 
 
 @dataclass(frozen=True)
@@ -136,7 +159,7 @@ class ButtonConfig:
     name: str
     output: str
     channel: int
-    control: int
+    control: int | None = None
     color: str = "#d26a2e"
     show_label: bool = True
     width: SizeSpec | None = None
@@ -145,7 +168,31 @@ class ButtonConfig:
 
     @property
     def state_key(self) -> str:
+        if self.control is None:
+            return f"button:{self.name}"
         return f"ch{self.channel}:cc{self.control}:{self.name}"
+
+
+@dataclass(frozen=True)
+class ToggleConfig:
+    name: str
+    output: str
+    channel: int
+    control: int | None = None
+    default: float = 0.0
+    minimum: float = 0.0
+    maximum: float = 127.0
+    color: str = "#d26a2e"
+    show_label: bool = True
+    width: SizeSpec | None = None
+    height: SizeSpec | None = None
+    osc: "OscRouteConfig | None" = None
+
+    @property
+    def state_key(self) -> str:
+        if self.control is None:
+            return f"toggle:{self.name}"
+        return f"toggle:ch{self.channel}:cc{self.control}:{self.name}"
 
 
 @dataclass(frozen=True)
@@ -153,12 +200,12 @@ class CurveConfig:
     name: str
     output: str
     channel: int
-    control: int
-    length: float
+    control: int | None = None
+    length: DynamicNumber = 1.0
     mode: str = "loop"
-    default: int = 0
-    minimum: int = 0
-    maximum: int = 127
+    default: float = 0.0
+    minimum: DynamicNumber = 0.0
+    maximum: DynamicNumber = 127.0
     color: str = "#d26a2e"
     show_label: bool = True
     width: SizeSpec | None = None
@@ -167,6 +214,8 @@ class CurveConfig:
 
     @property
     def state_key(self) -> str:
+        if self.control is None:
+            return f"curve:{self.name}"
         return f"curve:ch{self.channel}:cc{self.control}:{self.name}"
 
 
@@ -199,6 +248,7 @@ class SequencerConfig:
     control: int | None = None
     minimum: int = 0
     maximum: int = 127
+    note: int | None = None
     root: int | None = None
     scale: str | None = None
     velocity_row: bool = False
@@ -208,6 +258,7 @@ class SequencerConfig:
     default_gate: float = 1.0
     default_timing: float = 0.0
     max_gate_steps: float = 1.0
+    max_timing: float = 1.0
     color: str = "#d26a2e"
     show_label: bool = True
     width: SizeSpec | None = None
@@ -286,6 +337,7 @@ ControlConfig = Union[
     SliderConfig,
     KeyboardConfig,
     ButtonConfig,
+    ToggleConfig,
     CurveConfig,
     TempoConfig,
     SequencerConfig,
@@ -296,6 +348,7 @@ LayoutNode = Union[
     SliderConfig,
     KeyboardConfig,
     ButtonConfig,
+    ToggleConfig,
     CurveConfig,
     TempoConfig,
     SequencerConfig,
@@ -315,6 +368,7 @@ class AppConfig:
     layout: LayoutNode
     sliders: list[SliderConfig]
     curves: list[CurveConfig] | None = None
+    toggles: list[ToggleConfig] | None = None
     tempo: TempoConfig | None = None
     sequencers: list[SequencerConfig] | None = None
     memories: list[MemoryConfig] | None = None
@@ -362,8 +416,8 @@ class OscOutputConfig:
 @dataclass(frozen=True)
 class OscRouteConfig:
     path: str
-    minimum: float = 0.0
-    maximum: float = 1.0
+    minimum: DynamicNumber | None = None
+    maximum: DynamicNumber | None = None
 
 
 def main() -> None:
@@ -455,6 +509,10 @@ def build_web_server(*, runtime: "RuntimeState") -> ThreadingHTTPServer:
                 self.handle_slider_post()
                 return
 
+            if parsed.path == "/api/lfo":
+                self.handle_lfo_post()
+                return
+
             if parsed.path == "/api/curve":
                 self.handle_curve_post()
                 return
@@ -465,6 +523,10 @@ def build_web_server(*, runtime: "RuntimeState") -> ThreadingHTTPServer:
 
             if parsed.path == "/api/button":
                 self.handle_button_post()
+                return
+
+            if parsed.path == "/api/toggle":
+                self.handle_toggle_post()
                 return
 
             if parsed.path == "/api/tempo":
@@ -507,6 +569,31 @@ def build_web_server(*, runtime: "RuntimeState") -> ThreadingHTTPServer:
                     "value": normalize_numeric_value(runtime.get_slider_value(updated)),
                 }
             ).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def handle_lfo_post(self) -> None:
+            content_length = int(self.headers.get("Content-Length", "0"))
+            raw = self.rfile.read(content_length)
+            try:
+                body = json.loads(raw.decode("utf-8"))
+                state_key = str(body["key"])
+                runtime.update_lfo_by_key(
+                    state_key=state_key,
+                    midpoint=float(body["midpoint"]),
+                    depth=float(body["depth"]),
+                    rate=float(body["rate"]),
+                    waveform=str(body["waveform"]),
+                    jitter=float(body["jitter"]),
+                )
+            except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+                self.send_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+
+            payload = json.dumps({"key": state_key}).encode("utf-8")
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(payload)))
@@ -570,6 +657,32 @@ def build_web_server(*, runtime: "RuntimeState") -> ThreadingHTTPServer:
                 return
 
             payload = json.dumps({"key": state_key, "gate": gate}).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def handle_toggle_post(self) -> None:
+            content_length = int(self.headers.get("Content-Length", "0"))
+            raw = self.rfile.read(content_length)
+            try:
+                body = json.loads(raw.decode("utf-8"))
+                state_key = str(body["key"])
+                enabled = bool(body["enabled"])
+                updated = runtime.set_toggle_state(state_key=state_key, enabled=enabled)
+                value = runtime.get_toggle_value(updated)
+            except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+                self.send_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+
+            payload = json.dumps(
+                {
+                    "key": updated.state_key,
+                    "enabled": value == updated.maximum,
+                    "value": normalize_numeric_value(value),
+                }
+            ).encode("utf-8")
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(payload)))
@@ -769,6 +882,7 @@ def load_config(config_path: Path) -> AppConfig:
     layout = parse_root_layout(raw=raw, config_path=config_path, palette=palette, root_bpm=bpm)
     sliders = collect_sliders(layout)
     curves = collect_curves(layout)
+    toggles = collect_toggles(layout)
     tempo = collect_tempo(layout)
     sequencers = collect_sequencers(layout)
     memories = collect_memories(layout)
@@ -790,6 +904,7 @@ def load_config(config_path: Path) -> AppConfig:
         layout=layout,
         sliders=sliders,
         curves=curves,
+        toggles=toggles,
         tempo=tempo,
         sequencers=sequencers,
         memories=memories,
@@ -835,14 +950,16 @@ def parse_osc_output(raw: Any, *, config_path: Path) -> OscOutputConfig | None:
     )
 
 
+YAML_CONTAINER_KEYS = ("column", "row", "tabs")
+YAML_CONTAINER_KEY_LIST = "'column', 'row', or 'tabs'"
+
+
 def parse_root_layout(
     *, raw: dict[str, Any], config_path: Path, palette: dict[str, str], root_bpm: float
 ) -> LayoutNode:
-    container_keys = [key for key in ("rows", "columns", "tabs") if key in raw]
+    container_keys = [key for key in YAML_CONTAINER_KEYS if key in raw]
     if len(container_keys) != 1:
-        raise SystemExit(
-            f"Config {config_path} must define exactly one of 'rows', 'columns', or 'tabs'"
-        )
+        raise SystemExit(f"Config {config_path} must define exactly one of {YAML_CONTAINER_KEY_LIST}")
     return parse_container(
         key=container_keys[0],
         children_raw=raw[container_keys[0]],
@@ -885,7 +1002,7 @@ def parse_container(
             defaults=defaults,
         )
     return parse_group(
-        kind="row" if key == "rows" else "column",
+        kind="row" if key == "column" else "column",
         children_raw=children_raw,
         config_path=config_path,
         path=path,
@@ -916,10 +1033,10 @@ def parse_group(
         if not isinstance(item, dict):
             raise SystemExit(f"{config_path} {child_path} must be a mapping")
 
-        child_container_keys = [key for key in ("rows", "columns", "tabs") if key in item]
+        child_container_keys = [key for key in YAML_CONTAINER_KEYS if key in item]
         if len(child_container_keys) > 1:
             raise SystemExit(
-                f"{config_path} {child_path} must not define more than one of 'rows', 'columns', or 'tabs'"
+                f"{config_path} {child_path} must not define more than one of {YAML_CONTAINER_KEY_LIST}"
             )
 
         if child_container_keys:
@@ -1019,11 +1136,9 @@ def parse_tab(
     if not isinstance(name, str) or not name.strip():
         raise SystemExit(f"{config_path} {path}.name must be a non-empty string")
 
-    container_keys = [key for key in ("rows", "columns", "tabs") if key in raw]
+    container_keys = [key for key in YAML_CONTAINER_KEYS if key in raw]
     if len(container_keys) != 1:
-        raise SystemExit(
-            f"{config_path} {path} must define exactly one of 'rows', 'columns', or 'tabs'"
-        )
+        raise SystemExit(f"{config_path} {path} must define exactly one of {YAML_CONTAINER_KEY_LIST}")
 
     key = container_keys[0]
     tab_defaults = parse_layout_defaults(
@@ -1054,14 +1169,13 @@ def parse_control(
     defaults: LayoutDefaults,
 ) -> ControlConfig:
     control_type = str(raw.get("type", "slider")).strip() or "slider"
-    if control_type in {"slider", "lfo"}:
+    if control_type == "slider":
         return parse_slider(
             raw,
             config_path=config_path,
             path=path,
             palette=palette,
             defaults=defaults,
-            control_type=control_type,
         )
     if control_type == "keyboard":
         return parse_keyboard(
@@ -1073,6 +1187,14 @@ def parse_control(
         )
     if control_type == "button":
         return parse_button(
+            raw,
+            config_path=config_path,
+            path=path,
+            palette=palette,
+            defaults=defaults,
+        )
+    if control_type == "toggle":
+        return parse_toggle(
             raw,
             config_path=config_path,
             path=path,
@@ -1121,7 +1243,7 @@ def parse_control(
             defaults=defaults,
         )
     raise SystemExit(
-        f"{config_path} {path}.type must be 'slider', 'lfo', 'keyboard', 'button', 'curve', 'tempo', 'sequencer', 'memory', or 'mutator'"
+        f"{config_path} {path}.type must be 'slider', 'keyboard', 'button', 'toggle', 'curve', 'tempo', 'sequencer', 'memory', or 'mutator'"
     )
 
 
@@ -1132,25 +1254,22 @@ def parse_slider(
     path: str,
     palette: dict[str, str],
     defaults: LayoutDefaults,
-    control_type: str = "slider",
 ) -> SliderConfig:
     try:
-        minimum = validate_range(
-            int(raw.get("min", defaults.minimum)), 0, 127, f"{path}.min", config_path
+        minimum = parse_finite_number(
+            raw.get("min", defaults.minimum), config_path=config_path, path=f"{path}.min"
         )
-        maximum = validate_range(
-            int(raw.get("max", defaults.maximum)), 0, 127, f"{path}.max", config_path
+        maximum = parse_finite_number(
+            raw.get("max", defaults.maximum), config_path=config_path, path=f"{path}.max"
         )
         default_value = raw.get("default", defaults.default)
-        if control_type == "lfo" and "default" not in raw:
-            default_value = int(round((minimum + maximum) / 2))
         slider = SliderConfig(
             output=parse_output_name(
                 raw.get("output", defaults.output),
                 config_path=config_path,
                 path=f"{path}.output",
             ),
-            control_type=control_type,
+            control_type="slider",
             complex=parse_boolean(
                 raw.get("complex", True),
                 config_path=config_path,
@@ -1176,12 +1295,12 @@ def parse_slider(
             ),
             name=str(raw["name"]),
             channel=validate_range(
-                int(raw.get("channel", defaults.channel)), 1, 16, f"{path}.channel", config_path
+                int(raw.get("channel", defaults.channel)), 0, 15, f"{path}.channel", config_path
             ),
-            control=validate_range(int(raw["control"]), 0, 127, f"{path}.control", config_path),
-            default=validate_range(
-                int(default_value), 0, 127, f"{path}.default", config_path
+            control=parse_optional_range(
+                raw.get("control"), 0, 127, f"{path}.control", config_path
             ),
+            default=parse_finite_number(default_value, config_path=config_path, path=f"{path}.default"),
             minimum=minimum,
             maximum=maximum,
             steps=parse_steps(
@@ -1239,7 +1358,7 @@ def parse_keyboard(
                 path=f"{path}.output",
             ),
             channel=validate_range(
-                int(raw.get("channel", defaults.channel)), 1, 16, f"{path}.channel", config_path
+                int(raw.get("channel", defaults.channel)), 0, 15, f"{path}.channel", config_path
             ),
             start=parse_midi_note(raw.get("start", 60), config_path=config_path, path=f"{path}.start"),
             size=parse_keyboard_size(raw.get("size", 12), config_path=config_path, path=f"{path}.size"),
@@ -1286,9 +1405,11 @@ def parse_button(
                 path=f"{path}.output",
             ),
             channel=validate_range(
-                int(raw.get("channel", defaults.channel)), 1, 16, f"{path}.channel", config_path
+                int(raw.get("channel", defaults.channel)), 0, 15, f"{path}.channel", config_path
             ),
-            control=validate_range(int(raw["control"]), 0, 127, f"{path}.control", config_path),
+            control=parse_optional_range(
+                raw.get("control"), 0, 127, f"{path}.control", config_path
+            ),
             color=resolve_color(
                 raw.get("color", defaults.color),
                 palette=palette,
@@ -1309,6 +1430,65 @@ def parse_button(
         raise SystemExit(f"{config_path} {path} is missing '{missing}'") from exc
 
 
+def parse_toggle(
+    raw: dict[str, Any],
+    *,
+    config_path: Path,
+    path: str,
+    palette: dict[str, str],
+    defaults: LayoutDefaults,
+) -> ToggleConfig:
+    try:
+        minimum = parse_finite_number(
+            raw.get("min", 0.0), config_path=config_path, path=f"{path}.min"
+        )
+        maximum = parse_finite_number(
+            raw.get("max", 127.0), config_path=config_path, path=f"{path}.max"
+        )
+        toggle = ToggleConfig(
+            name=str(raw["name"]),
+            output=parse_output_name(
+                raw.get("output", defaults.output),
+                config_path=config_path,
+                path=f"{path}.output",
+            ),
+            channel=validate_range(
+                int(raw.get("channel", defaults.channel)), 0, 15, f"{path}.channel", config_path
+            ),
+            control=parse_optional_range(
+                raw.get("control"), 0, 127, f"{path}.control", config_path
+            ),
+            default=parse_finite_number(
+                raw.get("default", minimum), config_path=config_path, path=f"{path}.default"
+            ),
+            minimum=minimum,
+            maximum=maximum,
+            color=resolve_color(
+                raw.get("color", defaults.color),
+                palette=palette,
+                config_path=config_path,
+                path=f"{path}.color",
+            ),
+            show_label=parse_boolean(
+                raw.get("show_label", defaults.show_label),
+                config_path=config_path,
+                path=f"{path}.show_label",
+            ),
+            width=parse_size(raw.get("width"), config_path=config_path, path=f"{path}.width"),
+            height=parse_size(raw.get("height"), config_path=config_path, path=f"{path}.height"),
+            osc=parse_osc_route(raw.get("osc"), config_path=config_path, path=f"{path}.osc"),
+        )
+    except KeyError as exc:
+        missing = exc.args[0]
+        raise SystemExit(f"{config_path} {path} is missing '{missing}'") from exc
+
+    if toggle.minimum > toggle.maximum:
+        raise SystemExit(f"{config_path} {path} has min greater than max")
+    if not toggle.minimum <= toggle.default <= toggle.maximum:
+        raise SystemExit(f"{config_path} {path} has default outside min/max range")
+    return toggle
+
+
 def parse_curve_control(
     raw: dict[str, Any],
     *,
@@ -1318,19 +1498,17 @@ def parse_curve_control(
     defaults: LayoutDefaults,
 ) -> CurveConfig:
     try:
-        minimum = validate_range(
-            int(raw.get("min", defaults.minimum)), 0, 127, f"{path}.min", config_path
+        minimum = parse_dynamic_numeric_value(
+            raw.get("min", defaults.minimum), config_path=config_path, path=f"{path}.min"
         )
-        maximum = validate_range(
-            int(raw.get("max", defaults.maximum)), 0, 127, f"{path}.max", config_path
+        maximum = parse_dynamic_numeric_value(
+            raw.get("max", defaults.maximum), config_path=config_path, path=f"{path}.max"
         )
-        default = validate_range(
-            int(raw.get("default", raw.get("initial", defaults.default))),
-            0,
-            127,
-            f"{path}.default",
-            config_path,
-        )
+        for label, value in (("min", minimum), ("max", maximum)):
+            if not isinstance(value, str) and not math.isfinite(value):
+                raise SystemExit(f"{config_path} {path}.{label} must be a finite number")
+        default_value = raw.get("default", defaults.default)
+        default = parse_finite_number(default_value, config_path=config_path, path=f"{path}.default")
         curve = CurveConfig(
             name=str(raw["name"]),
             output=parse_output_name(
@@ -1339,9 +1517,11 @@ def parse_curve_control(
                 path=f"{path}.output",
             ),
             channel=validate_range(
-                int(raw.get("channel", defaults.channel)), 1, 16, f"{path}.channel", config_path
+                int(raw.get("channel", defaults.channel)), 0, 15, f"{path}.channel", config_path
             ),
-            control=validate_range(int(raw["control"]), 0, 127, f"{path}.control", config_path),
+            control=parse_optional_range(
+                raw.get("control"), 0, 127, f"{path}.control", config_path
+            ),
             length=parse_positive_duration(
                 raw.get("length", 1.0), config_path=config_path, path=f"{path}.length"
             ),
@@ -1368,9 +1548,17 @@ def parse_curve_control(
         missing = exc.args[0]
         raise SystemExit(f"{config_path} {path} is missing '{missing}'") from exc
 
-    if curve.minimum > curve.maximum:
+    if (
+        not isinstance(curve.minimum, str)
+        and not isinstance(curve.maximum, str)
+        and curve.minimum > curve.maximum
+    ):
         raise SystemExit(f"{config_path} {path} has min greater than max")
-    if not curve.minimum <= curve.default <= curve.maximum:
+    if (
+        not isinstance(curve.minimum, str)
+        and not isinstance(curve.maximum, str)
+        and not curve.minimum <= curve.default <= curve.maximum
+    ):
         raise SystemExit(f"{config_path} {path} has default outside min/max range")
     return curve
 
@@ -1437,6 +1625,13 @@ def parse_sequencer(
             config_path=config_path,
             path=path,
         )
+        max_timing = parse_timing_max_alias(
+            raw,
+            keys=("timing_max", "max_timing"),
+            default=1.0,
+            config_path=config_path,
+            path=path,
+        )
         sequencer = SequencerConfig(
             name=str(raw["name"]),
             output=parse_output_name(
@@ -1451,7 +1646,7 @@ def parse_sequencer(
                 raw["subdivision"], config_path=config_path, path=f"{path}.subdivision"
             ),
             channel=validate_range(
-                int(raw.get("channel", defaults.channel)), 1, 16, f"{path}.channel", config_path
+                int(raw.get("channel", defaults.channel)), 0, 15, f"{path}.channel", config_path
             ),
             control=parse_optional_range(
                 raw.get("control"), 0, 127, f"{path}.control", config_path
@@ -1462,6 +1657,7 @@ def parse_sequencer(
             maximum=validate_range(
                 int(raw.get("max", defaults.maximum)), 0, 127, f"{path}.max", config_path
             ),
+            note=parse_optional_midi_note(raw.get("note"), config_path=config_path, path=f"{path}.note"),
             root=parse_optional_midi_note(raw.get("root"), config_path=config_path, path=f"{path}.root"),
             scale=parse_scale_name(raw.get("scale"), config_path=config_path, path=f"{path}.scale"),
             velocity_row=parse_optional_boolean_alias(
@@ -1503,10 +1699,12 @@ def parse_sequencer(
                 raw,
                 keys=("timing",),
                 default=0.0,
+                max_timing=max_timing,
                 config_path=config_path,
                 path=path,
             ),
             max_gate_steps=max_gate_steps,
+            max_timing=max_timing,
             color=resolve_color(
                 raw.get("color", defaults.color),
                 palette=palette,
@@ -1528,8 +1726,8 @@ def parse_sequencer(
 
     if sequencer.minimum > sequencer.maximum:
         raise SystemExit(f"{config_path} {path} has min greater than max")
-    if sequencer.mode not in {"notes", "cc"}:
-        raise SystemExit(f"{config_path} {path}.mode must be 'notes' or 'cc'")
+    if sequencer.mode not in {"notes", "note", "cc"}:
+        raise SystemExit(f"{config_path} {path}.mode must be 'notes', 'note', or 'cc'")
     if sequencer.scale is not None and sequencer.root is None:
         raise SystemExit(f"{config_path} {path} must define root when scale is set")
     if sequencer.root is not None and sequencer.scale is None:
@@ -1543,6 +1741,19 @@ def parse_sequencer(
             raise SystemExit(f"{config_path} {path}.control is only valid for cc sequencers")
         if sequencer.osc is not None:
             raise SystemExit(f"{config_path} {path}.osc is only valid for cc sequencers")
+        if sequencer.note is not None:
+            raise SystemExit(f"{config_path} {path}.note is only valid for note sequencers")
+    elif sequencer.mode == "note":
+        if sequencer.note is None:
+            raise SystemExit(f"{config_path} {path}.note is required for note sequencers")
+        if sequencer.control is not None:
+            raise SystemExit(f"{config_path} {path}.control is only valid for cc sequencers")
+        if sequencer.osc is not None:
+            raise SystemExit(f"{config_path} {path}.osc is only valid for cc sequencers")
+        if sequencer.velocity_row:
+            raise SystemExit(f"{config_path} {path}.velocity_row is not valid for note sequencers")
+        if sequencer.root is not None or sequencer.scale is not None:
+            raise SystemExit(f"{config_path} {path} root/scale are only valid for notes sequencers")
     else:
         if sequencer.velocity_row:
             raise SystemExit(f"{config_path} {path}.velocity_row is only valid for note sequencers")
@@ -1558,10 +1769,14 @@ def parse_sequencer(
             raise SystemExit(f"{config_path} {path}.timing is only valid for note sequencers")
         if sequencer.max_gate_steps != 1.0:
             raise SystemExit(f"{config_path} {path}.max_gate_steps is only valid for note sequencers")
+        if sequencer.max_timing != 1.0:
+            raise SystemExit(f"{config_path} {path}.timing_max is only valid for note sequencers")
         if sequencer.control is None and sequencer.osc is None:
             raise SystemExit(f"{config_path} {path} cc sequencers require control and/or osc")
         if sequencer.root is not None or sequencer.scale is not None:
             raise SystemExit(f"{config_path} {path} root/scale are only valid for note sequencers")
+        if sequencer.note is not None:
+            raise SystemExit(f"{config_path} {path}.note is only valid for note sequencers")
     return sequencer
 
 
@@ -1691,19 +1906,19 @@ def parse_layout_defaults(
 
     channel = inherited.channel
     if "channel" in raw:
-        channel = validate_range(int(raw["channel"]), 1, 16, f"{path}.channel", config_path)
+        channel = validate_range(int(raw["channel"]), 0, 15, f"{path}.channel", config_path)
 
     default = inherited.default
     if "default" in raw:
-        default = validate_range(int(raw["default"]), 0, 127, f"{path}.default", config_path)
+        default = parse_finite_number(raw["default"], config_path=config_path, path=f"{path}.default")
 
     minimum = inherited.minimum
     if "min" in raw:
-        minimum = validate_range(int(raw["min"]), 0, 127, f"{path}.min", config_path)
+        minimum = parse_finite_number(raw["min"], config_path=config_path, path=f"{path}.min")
 
     maximum = inherited.maximum
     if "max" in raw:
-        maximum = validate_range(int(raw["max"]), 0, 127, f"{path}.max", config_path)
+        maximum = parse_finite_number(raw["max"], config_path=config_path, path=f"{path}.max")
 
     steps = inherited.steps
     if "steps" in raw:
@@ -1764,17 +1979,32 @@ def parse_output_name(raw: Any, *, config_path: Path, path: str) -> str:
 def parse_osc_route(raw: Any, *, config_path: Path, path: str) -> OscRouteConfig | None:
     if raw is None:
         return None
+    if isinstance(raw, str):
+        if not raw.strip():
+            raise SystemExit(f"{config_path} {path} must be a non-empty OSC path")
+        return OscRouteConfig(path=raw.strip())
     if not isinstance(raw, dict):
-        raise SystemExit(f"{config_path} {path} must be a mapping")
+        raise SystemExit(f"{config_path} {path} must be a mapping or string")
 
     osc_path = raw.get("path")
     if not isinstance(osc_path, str) or not osc_path.strip():
         raise SystemExit(f"{config_path} {path}.path must be a non-empty string")
 
-    minimum = parse_numeric_value(raw.get("min", 0.0), config_path=config_path, path=f"{path}.min")
-    maximum = parse_numeric_value(raw.get("max", 1.0), config_path=config_path, path=f"{path}.max")
-    if minimum > maximum:
-        raise SystemExit(f"{config_path} {path} has min greater than max")
+    minimum = (
+        parse_dynamic_numeric_value(raw["min"], config_path=config_path, path=f"{path}.min")
+        if "min" in raw
+        else None
+    )
+    maximum = (
+        parse_dynamic_numeric_value(raw["max"], config_path=config_path, path=f"{path}.max")
+        if "max" in raw
+        else None
+    )
+    for label, value in (("min", minimum), ("max", maximum)):
+        if value is None:
+            continue
+        if not isinstance(value, str) and not math.isfinite(value):
+            raise SystemExit(f"{config_path} {path}.{label} must be a finite number")
 
     return OscRouteConfig(path=osc_path.strip(), minimum=minimum, maximum=maximum)
 
@@ -1807,6 +2037,15 @@ def parse_unit_interval(raw: Any, *, config_path: Path, path: str) -> float:
     return value
 
 
+def parse_finite_number(raw: Any, *, config_path: Path, path: str) -> float:
+    if isinstance(raw, bool):
+        raise SystemExit(f"{config_path} {path} must be a finite number")
+    value = parse_numeric_value(raw, config_path=config_path, path=path)
+    if not math.isfinite(value):
+        raise SystemExit(f"{config_path} {path} must be a finite number")
+    return value
+
+
 def parse_root_bpm(raw: Any, *, config_path: Path, path: str) -> float:
     if isinstance(raw, bool):
         raise SystemExit(f"{config_path} {path} must be a number")
@@ -1816,29 +2055,32 @@ def parse_root_bpm(raw: Any, *, config_path: Path, path: str) -> float:
     return round(value * 10.0) / 10.0
 
 
-def parse_speed(raw: Any, *, config_path: Path, path: str) -> float:
-    try:
-        value = float(raw)
-    except (TypeError, ValueError) as exc:
-        raise SystemExit(f"{config_path} {path} must be a number") from exc
+def parse_speed(raw: Any, *, config_path: Path, path: str) -> DynamicNumber:
+    value = parse_dynamic_numeric_value(raw, config_path=config_path, path=path)
+    if isinstance(value, str):
+        return value
+    if not math.isfinite(value):
+        raise SystemExit(f"{config_path} {path} must be a finite number")
     if value <= 0:
         raise SystemExit(f"{config_path} {path} must be greater than 0")
     return value
 
 
-def parse_curve(raw: Any, *, config_path: Path, path: str) -> float:
-    if isinstance(raw, bool):
-        raise SystemExit(f"{config_path} {path} must be a number")
-    value = parse_numeric_value(raw, config_path=config_path, path=path)
+def parse_curve(raw: Any, *, config_path: Path, path: str) -> DynamicNumber:
+    value = parse_dynamic_numeric_value(raw, config_path=config_path, path=path)
+    if isinstance(value, str):
+        return value
     if not math.isfinite(value):
         raise SystemExit(f"{config_path} {path} must be a finite number")
     return value
 
 
-def parse_positive_duration(raw: Any, *, config_path: Path, path: str) -> float:
-    if isinstance(raw, bool):
-        raise SystemExit(f"{config_path} {path} must be a number")
-    value = parse_numeric_value(raw, config_path=config_path, path=path)
+def parse_positive_duration(raw: Any, *, config_path: Path, path: str) -> DynamicNumber:
+    value = parse_dynamic_numeric_value(raw, config_path=config_path, path=path)
+    if isinstance(value, str):
+        return value
+    if not math.isfinite(value):
+        raise SystemExit(f"{config_path} {path} must be a finite number")
     if value <= 0:
         raise SystemExit(f"{config_path} {path} must be greater than 0")
     return value
@@ -1853,11 +2095,12 @@ def parse_curve_mode(raw: Any, *, config_path: Path, path: str) -> str:
     return value
 
 
-def parse_nonnegative_speed(raw: Any, *, config_path: Path, path: str) -> float:
-    try:
-        value = float(raw)
-    except (TypeError, ValueError) as exc:
-        raise SystemExit(f"{config_path} {path} must be a number") from exc
+def parse_nonnegative_speed(raw: Any, *, config_path: Path, path: str) -> DynamicNumber:
+    value = parse_dynamic_numeric_value(raw, config_path=config_path, path=path)
+    if isinstance(value, str):
+        return value
+    if not math.isfinite(value):
+        raise SystemExit(f"{config_path} {path} must be a finite number")
     if value < 0:
         raise SystemExit(f"{config_path} {path} must be 0 or greater")
     return value
@@ -2015,6 +2258,21 @@ def parse_numeric_value(raw: Any, *, config_path: Path, path: str) -> float:
         raise SystemExit(f"{config_path} {path} must be a number") from exc
 
 
+def parse_dynamic_numeric_value(raw: Any, *, config_path: Path, path: str) -> DynamicNumber:
+    if isinstance(raw, bool):
+        raise SystemExit(f"{config_path} {path} must be a number or control name")
+    if isinstance(raw, str):
+        value = raw.strip()
+        if not value:
+            raise SystemExit(f"{config_path} {path} must be a non-empty number or control name")
+        try:
+            numeric_value = float(value)
+        except ValueError:
+            return value
+        return numeric_value
+    return parse_numeric_value(raw, config_path=config_path, path=path)
+
+
 def parse_size(value: Any, *, config_path: Path, path: str) -> SizeSpec | None:
     if value is None:
         return None
@@ -2032,7 +2290,7 @@ def parse_size(value: Any, *, config_path: Path, path: str) -> SizeSpec | None:
 def collect_sliders(node: LayoutNode) -> list[SliderConfig]:
     if isinstance(node, SliderConfig):
         return [node]
-    if isinstance(node, (KeyboardConfig, ButtonConfig, CurveConfig, TempoConfig, SequencerConfig, MemoryConfig, MutatorConfig)):
+    if isinstance(node, (KeyboardConfig, ButtonConfig, ToggleConfig, CurveConfig, TempoConfig, SequencerConfig, MemoryConfig, MutatorConfig)):
         return []
     if isinstance(node, TabsConfig):
         sliders: list[SliderConfig] = []
@@ -2049,7 +2307,7 @@ def collect_sliders(node: LayoutNode) -> list[SliderConfig]:
 def collect_curves(node: LayoutNode) -> list[CurveConfig]:
     if isinstance(node, CurveConfig):
         return [node]
-    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, TempoConfig, SequencerConfig, MemoryConfig, MutatorConfig)):
+    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, ToggleConfig, TempoConfig, SequencerConfig, MemoryConfig, MutatorConfig)):
         return []
     if isinstance(node, TabsConfig):
         curves: list[CurveConfig] = []
@@ -2063,10 +2321,27 @@ def collect_curves(node: LayoutNode) -> list[CurveConfig]:
     return curves
 
 
+def collect_toggles(node: LayoutNode) -> list[ToggleConfig]:
+    if isinstance(node, ToggleConfig):
+        return [node]
+    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, CurveConfig, TempoConfig, SequencerConfig, MemoryConfig, MutatorConfig)):
+        return []
+    if isinstance(node, TabsConfig):
+        toggles: list[ToggleConfig] = []
+        for tab in node.tabs:
+            toggles.extend(collect_toggles(tab.content))
+        return toggles
+
+    toggles: list[ToggleConfig] = []
+    for child in node.children:
+        toggles.extend(collect_toggles(child))
+    return toggles
+
+
 def collect_buttons_by_key(node: LayoutNode) -> dict[str, ButtonConfig]:
     if isinstance(node, ButtonConfig):
         return {node.state_key: node}
-    if isinstance(node, (SliderConfig, KeyboardConfig, CurveConfig, TempoConfig, SequencerConfig, MemoryConfig, MutatorConfig)):
+    if isinstance(node, (SliderConfig, KeyboardConfig, ToggleConfig, CurveConfig, TempoConfig, SequencerConfig, MemoryConfig, MutatorConfig)):
         return {}
     if isinstance(node, TabsConfig):
         buttons: dict[str, ButtonConfig] = {}
@@ -2083,7 +2358,7 @@ def collect_buttons_by_key(node: LayoutNode) -> dict[str, ButtonConfig]:
 def find_keyboard_by_key(node: LayoutNode, state_key: str) -> KeyboardConfig | None:
     if isinstance(node, KeyboardConfig):
         return node if node.state_key == state_key else None
-    if isinstance(node, (SliderConfig, ButtonConfig, CurveConfig, TempoConfig, SequencerConfig, MemoryConfig, MutatorConfig)):
+    if isinstance(node, (SliderConfig, ButtonConfig, ToggleConfig, CurveConfig, TempoConfig, SequencerConfig, MemoryConfig, MutatorConfig)):
         return None
     if isinstance(node, TabsConfig):
         for tab in node.tabs:
@@ -2102,7 +2377,7 @@ def find_keyboard_by_key(node: LayoutNode, state_key: str) -> KeyboardConfig | N
 def collect_tempo(node: LayoutNode) -> TempoConfig | None:
     if isinstance(node, TempoConfig):
         return node
-    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, CurveConfig, SequencerConfig, MemoryConfig, MutatorConfig)):
+    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, ToggleConfig, CurveConfig, SequencerConfig, MemoryConfig, MutatorConfig)):
         return None
     if isinstance(node, TabsConfig):
         found: TempoConfig | None = None
@@ -2129,7 +2404,7 @@ def collect_tempo(node: LayoutNode) -> TempoConfig | None:
 def collect_sequencers(node: LayoutNode) -> list[SequencerConfig]:
     if isinstance(node, SequencerConfig):
         return [node]
-    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, CurveConfig, TempoConfig, MemoryConfig, MutatorConfig)):
+    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, ToggleConfig, CurveConfig, TempoConfig, MemoryConfig, MutatorConfig)):
         return []
     if isinstance(node, TabsConfig):
         sequencers: list[SequencerConfig] = []
@@ -2146,7 +2421,7 @@ def collect_sequencers(node: LayoutNode) -> list[SequencerConfig]:
 def collect_memories(node: LayoutNode) -> list[MemoryConfig]:
     if isinstance(node, MemoryConfig):
         return [node]
-    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, CurveConfig, TempoConfig, SequencerConfig, MutatorConfig)):
+    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, ToggleConfig, CurveConfig, TempoConfig, SequencerConfig, MutatorConfig)):
         return []
     if isinstance(node, TabsConfig):
         memories: list[MemoryConfig] = []
@@ -2163,7 +2438,7 @@ def collect_memories(node: LayoutNode) -> list[MemoryConfig]:
 def collect_mutators(node: LayoutNode) -> list[MutatorConfig]:
     if isinstance(node, MutatorConfig):
         return [node]
-    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, CurveConfig, TempoConfig, SequencerConfig, MemoryConfig)):
+    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, ToggleConfig, CurveConfig, TempoConfig, SequencerConfig, MemoryConfig)):
         return []
     if isinstance(node, TabsConfig):
         mutators: list[MutatorConfig] = []
@@ -2184,7 +2459,7 @@ def collect_midi_output_names(config: AppConfig) -> set[str]:
 
 
 def collect_layout_midi_output_names(node: LayoutNode, names: set[str]) -> None:
-    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, CurveConfig, TempoConfig, SequencerConfig)):
+    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, ToggleConfig, CurveConfig, TempoConfig, SequencerConfig)):
         names.add(node.output)
         return
     if isinstance(node, (MemoryConfig, MutatorConfig)):
@@ -2198,7 +2473,7 @@ def collect_layout_midi_output_names(node: LayoutNode, names: set[str]) -> None:
 
 
 def count_controls(node: LayoutNode) -> int:
-    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, CurveConfig, TempoConfig, SequencerConfig, MemoryConfig, MutatorConfig)):
+    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, ToggleConfig, CurveConfig, TempoConfig, SequencerConfig, MemoryConfig, MutatorConfig)):
         return 1
     if isinstance(node, TabsConfig):
         return sum(count_controls(tab.content) for tab in node.tabs)
@@ -2209,6 +2484,8 @@ def layout_has_osc_routes(node: LayoutNode) -> bool:
     if isinstance(node, SliderConfig):
         return node.osc is not None
     if isinstance(node, ButtonConfig):
+        return node.osc is not None
+    if isinstance(node, ToggleConfig):
         return node.osc is not None
     if isinstance(node, CurveConfig):
         return node.osc is not None
@@ -2266,7 +2543,7 @@ def resolve_memory_target(node: LayoutNode, target: str) -> LayoutNode | None:
 
 
 def collect_memory_target_matches(node: LayoutNode, target: str, matches: list[LayoutNode]) -> None:
-    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, CurveConfig, TempoConfig, SequencerConfig, MemoryConfig, MutatorConfig)):
+    if isinstance(node, (SliderConfig, KeyboardConfig, ButtonConfig, ToggleConfig, CurveConfig, TempoConfig, SequencerConfig, MemoryConfig, MutatorConfig)):
         if getattr(node, "name", None) == target:
             matches.append(node)
         return
@@ -2283,7 +2560,7 @@ def collect_memory_target_matches(node: LayoutNode, target: str, matches: list[L
 
 
 def target_has_recallable_state(node: LayoutNode) -> bool:
-    if isinstance(node, (SliderConfig, TempoConfig, SequencerConfig)):
+    if isinstance(node, (SliderConfig, ToggleConfig, TempoConfig, SequencerConfig)):
         return True
     if isinstance(node, (KeyboardConfig, ButtonConfig, CurveConfig, MemoryConfig, MutatorConfig)):
         return False
@@ -2293,7 +2570,7 @@ def target_has_recallable_state(node: LayoutNode) -> bool:
 
 
 def target_has_mutable_state(node: LayoutNode, mutator: MutatorConfig) -> bool:
-    if isinstance(node, (SliderConfig, TempoConfig)):
+    if isinstance(node, (SliderConfig, ToggleConfig, TempoConfig)):
         return True
     if isinstance(node, SequencerConfig):
         return mutator_can_mutate_sequencer(mutator)
@@ -2362,6 +2639,26 @@ def parse_positive_numeric_alias(
     return default
 
 
+def parse_timing_max_alias(
+    raw: dict[str, Any],
+    *,
+    keys: tuple[str, ...],
+    default: float,
+    config_path: Path,
+    path: str,
+) -> float:
+    for key in keys:
+        if key not in raw:
+            continue
+        if isinstance(raw[key], bool):
+            raise SystemExit(f"{config_path} {path}.{key} must be a number")
+        value = parse_numeric_value(raw[key], config_path=config_path, path=f"{path}.{key}")
+        if not 0 <= value <= 1:
+            raise SystemExit(f"{config_path} {path}.{key} must be between 0 and 1")
+        return round(value * 100.0) / 100.0
+    return default
+
+
 def parse_optional_velocity_alias(
     raw: dict[str, Any],
     *,
@@ -2385,6 +2682,7 @@ def parse_optional_timing_alias(
     *,
     keys: tuple[str, ...],
     default: float,
+    max_timing: float = 1.0,
     config_path: Path,
     path: str,
 ) -> float:
@@ -2394,7 +2692,7 @@ def parse_optional_timing_alias(
         if isinstance(raw[key], bool):
             raise SystemExit(f"{config_path} {path}.{key} must be a number")
         value = parse_numeric_value(raw[key], config_path=config_path, path=f"{path}.{key}")
-        return round(clamp_numeric_value(value, minimum=-1.0, maximum=1.0) * 100.0) / 100.0
+        return round(clamp_numeric_value(value, minimum=-max_timing, maximum=max_timing) * 100.0) / 100.0
     return default
 
 
@@ -2657,6 +2955,8 @@ class RuntimeState:
         self._sliders_by_key = {slider.state_key: slider for slider in config.sliders}
         self._curves = config.curves or []
         self._curves_by_key = {curve.state_key: curve for curve in self._curves}
+        self._toggles = config.toggles or []
+        self._toggles_by_key = {toggle.state_key: toggle for toggle in self._toggles}
         self._buttons_by_key = collect_buttons_by_key(config.layout)
         self._sequencers = config.sequencers or []
         self._sequencers_by_key = {sequencer.state_key: sequencer for sequencer in self._sequencers}
@@ -2674,6 +2974,9 @@ class RuntimeState:
         self._active_sequencer_notes: dict[int, ActiveSequencerNote] = {}
         self._active_sequencer_note_id = 0
         self._scheduled_sequencer_notes: list[ScheduledSequencerNote] = []
+        self._lfo_states: dict[str, LfoRuntimeState] = {}
+        self._lfo_stop_event = Event()
+        self._lfo_thread = Thread(target=self._run_lfo_clock, name="visual-midi-lfo-clock", daemon=True)
         self._tempo = config.tempo
         self._tempo_bpm = config.bpm
         if self._tempo is not None:
@@ -2688,8 +2991,11 @@ class RuntimeState:
         )
         self._reconcile_state()
         self._file_mtime_ns = self._read_mtime_ns()
+        self._lfo_thread.start()
 
     def close(self) -> None:
+        self._lfo_stop_event.set()
+        self._lfo_thread.join(timeout=1.0)
         self._transport.stop()
         self._handle_transport_stop()
         with self.lock:
@@ -2721,6 +3027,54 @@ class RuntimeState:
             if slider is None:
                 raise ValueError(f"Unknown slider key: {state_key}")
             self._update_slider_locked(slider, value)
+            return slider
+
+    def update_lfo_by_key(
+        self,
+        *,
+        state_key: str,
+        midpoint: float,
+        depth: float,
+        rate: float,
+        waveform: str,
+        jitter: float,
+    ) -> SliderConfig:
+        self.reload_if_needed()
+        with self.lock:
+            slider = self._sliders_by_key.get(state_key)
+            if slider is None:
+                raise ValueError(f"Unknown slider key: {state_key}")
+            if waveform not in slider.lfo_waveforms:
+                raise ValueError(f"Unknown LFO waveform: {waveform}")
+            lfo = self._lfo_states.get(state_key)
+            if lfo is None:
+                lfo = LfoRuntimeState(
+                    state_key=state_key,
+                    midpoint=quantize_slider_value(slider, midpoint),
+                    depth=0.0,
+                    rate=0.0,
+                    waveform=waveform,
+                    jitter=0.0,
+                    sample_hold_value=(random.random() * 2.0) - 1.0,
+                )
+                self._lfo_states[state_key] = lfo
+
+            lfo.midpoint = quantize_slider_value(slider, midpoint)
+            lfo.depth = clamp_numeric_value(depth, minimum=0.0, maximum=1.0)
+            max_rate = max(
+                0.0,
+                self._resolve_dynamic_number_locked(slider.max_speed, fallback=12.0),
+            )
+            lfo.rate = clamp_numeric_value(
+                rate,
+                minimum=0.0,
+                maximum=max_rate,
+            )
+            lfo.waveform = waveform
+            lfo.jitter = clamp_numeric_value(jitter, minimum=0.0, maximum=1.0)
+            if not self._is_lfo_active(lfo):
+                lfo.last_tick_at = None
+                self._update_slider_locked(slider, lfo.midpoint)
             return slider
 
     def send_curve_value_by_key(self, state_key: str, value: float) -> CurveConfig:
@@ -2772,6 +3126,12 @@ class RuntimeState:
                 self._update_slider_locked(
                     slider, self._state.get(slider.state_key, float(slider.default)), force_midi=True
                 )
+            for toggle in self._toggles:
+                self._update_toggle_locked(
+                    toggle,
+                    self._state.get(toggle.state_key, float(toggle.default)),
+                    force_midi=True,
+                )
             for curve in self._curves:
                 self._send_curve_value_locked(curve, curve.default, force_midi=True)
 
@@ -2792,6 +3152,23 @@ class RuntimeState:
             if button is None:
                 raise ValueError(f"Unknown button key: {state_key}")
             self._send_button_gate_locked(button=button, gate=gate)
+
+    def get_toggle_value(self, toggle: ToggleConfig) -> float:
+        self.reload_if_needed()
+        with self.lock:
+            if toggle.state_key not in self._toggles_by_key:
+                raise ValueError(f"Unknown toggle key: {toggle.state_key}")
+            return self._state.get(toggle.state_key, toggle.default)
+
+    def set_toggle_state(self, *, state_key: str, enabled: bool) -> ToggleConfig:
+        self.reload_if_needed()
+        with self.lock:
+            toggle = self._toggles_by_key.get(state_key)
+            if toggle is None:
+                raise ValueError(f"Unknown toggle key: {state_key}")
+            value = toggle.maximum if enabled else toggle.minimum
+            self._update_toggle_locked(toggle, value, force_midi=True)
+            return toggle
 
     def update_sequencer_by_key(
         self, state_key: str, steps: list[dict[str, Any]]
@@ -2862,6 +3239,7 @@ class RuntimeState:
             "inertia": config.inertia,
             "version": self.version(),
             "layout": self._serialize_layout(config.layout),
+            "transportControlled": config.tempo is not None,
             "transport": {
                 "tempo": normalize_numeric_value(self._tempo_bpm),
                 "playing": self.is_transport_playing(),
@@ -2930,6 +3308,8 @@ class RuntimeState:
             self._sliders_by_key = {slider.state_key: slider for slider in new_config.sliders}
             self._curves = new_config.curves or []
             self._curves_by_key = {curve.state_key: curve for curve in self._curves}
+            self._toggles = new_config.toggles or []
+            self._toggles_by_key = {toggle.state_key: toggle for toggle in self._toggles}
             self._buttons_by_key = collect_buttons_by_key(new_config.layout)
             self._sequencers = new_config.sequencers or []
             self._sequencers_by_key = {
@@ -2953,6 +3333,9 @@ class RuntimeState:
                 for key, generation in self._transition_generation.items()
                 if key in self._sliders_by_key
             }
+            self._lfo_states = {
+                key: lfo for key, lfo in self._lfo_states.items() if key in self._sliders_by_key
+            }
             self._tempo = new_config.tempo
             self._active_buttons = {}
             self._reconcile_state()
@@ -2971,6 +3354,12 @@ class RuntimeState:
                 self._update_slider_locked(
                     slider,
                     self._state.get(slider.state_key, float(slider.default)),
+                    force_midi=True,
+                )
+            for toggle in self._toggles:
+                self._update_toggle_locked(
+                    toggle,
+                    self._state.get(toggle.state_key, float(toggle.default)),
                     force_midi=True,
                 )
             for curve in self._curves:
@@ -2993,6 +3382,7 @@ class RuntimeState:
                 "waveforms": list(node.lfo_waveforms),
                 "shapeControl": node.lfo_shape_control,
                 "value": value,
+                "default": node.default,
                 "channel": node.channel,
                 "control": node.control,
                 "min": node.minimum,
@@ -3005,7 +3395,7 @@ class RuntimeState:
                 "showLabel": node.show_label,
                 "width": serialize_size(node.width),
                 "height": serialize_size(node.height),
-                "osc": serialize_osc_route(node.osc),
+                "osc": serialize_osc_route(node.osc, minimum=node.minimum, maximum=node.maximum),
                 "label": self.format_slider_label(node, value),
             }
         if isinstance(node, KeyboardConfig):
@@ -3031,7 +3421,6 @@ class RuntimeState:
                 "mode": node.mode,
                 "length": normalize_numeric_value(node.length),
                 "default": node.default,
-                "initial": node.default,
                 "channel": node.channel,
                 "control": node.control,
                 "min": node.minimum,
@@ -3040,7 +3429,7 @@ class RuntimeState:
                 "showLabel": node.show_label,
                 "width": serialize_size(node.width),
                 "height": serialize_size(node.height),
-                "osc": serialize_osc_route(node.osc),
+                "osc": serialize_osc_route(node.osc, minimum=node.minimum, maximum=node.maximum),
             }
         if isinstance(node, TempoConfig):
             return {
@@ -3069,6 +3458,7 @@ class RuntimeState:
                 "subdivisionBeats": normalize_numeric_value(node.subdivision_beats),
                 "min": node.minimum,
                 "max": node.maximum,
+                "note": node.note,
                 "root": node.root,
                 "scale": node.scale,
                 "velocityRow": node.velocity_row,
@@ -3078,11 +3468,12 @@ class RuntimeState:
                 "defaultGate": normalize_numeric_value(node.default_gate),
                 "defaultTiming": normalize_numeric_value(node.default_timing),
                 "maxGateSteps": normalize_numeric_value(node.max_gate_steps),
+                "timingMax": normalize_numeric_value(node.max_timing),
                 "color": node.color,
                 "showLabel": node.show_label,
                 "width": serialize_size(node.width),
                 "height": serialize_size(node.height),
-                "osc": serialize_osc_route(node.osc),
+                "osc": serialize_osc_route(node.osc, minimum=node.minimum, maximum=node.maximum),
                 "steps": serialize_sequencer_steps(self._sequencer_state.get(node.state_key, [])),
                 "currentStep": self._sequencer_positions.get(node.state_key, -1),
             }
@@ -3098,6 +3489,25 @@ class RuntimeState:
                 "width": serialize_size(node.width),
                 "height": serialize_size(node.height),
                 "osc": serialize_osc_route(node.osc),
+            }
+        if isinstance(node, ToggleConfig):
+            value = self.get_toggle_value(node)
+            return {
+                "type": "toggle",
+                "key": node.state_key,
+                "name": node.name,
+                "value": normalize_numeric_value(value),
+                "enabled": value == node.maximum,
+                "default": node.default,
+                "channel": node.channel,
+                "control": node.control,
+                "min": node.minimum,
+                "max": node.maximum,
+                "color": node.color,
+                "showLabel": node.show_label,
+                "width": serialize_size(node.width),
+                "height": serialize_size(node.height),
+                "osc": serialize_osc_route(node.osc, minimum=node.minimum, maximum=node.maximum),
             }
         if isinstance(node, MemoryConfig):
             slots = self._memory_state.get(node.state_key, [])
@@ -3152,6 +3562,9 @@ class RuntimeState:
         for slider in self._config.sliders:
             value = self._state.get(slider.state_key, float(slider.default))
             live_state[slider.state_key] = quantize_slider_value(slider, value)
+        for toggle in self._toggles:
+            value = self._state.get(toggle.state_key, float(toggle.default))
+            live_state[toggle.state_key] = quantize_toggle_value(toggle, value)
         if self._tempo is not None:
             live_state[self._tempo.state_key] = quantize_tempo_value(
                 self._tempo,
@@ -3194,24 +3607,39 @@ class RuntimeState:
         self._send_midi_value(slider, bounded, force=force_midi)
         self._send_osc_value(slider, bounded)
 
+    def _update_toggle_locked(self, toggle: ToggleConfig, value: float, *, force_midi: bool = False) -> None:
+        bounded = quantize_toggle_value(toggle, value)
+        self._state[toggle.state_key] = bounded
+        self._save_state_locked()
+        self._send_midi_value(toggle, bounded, force=force_midi)
+        self._send_osc_value(toggle, bounded)
+
     def _send_curve_value_locked(self, curve: CurveConfig, value: float, *, force_midi: bool = False) -> None:
-        bounded = quantize_curve_value(curve, value)
-        self._send_midi_control_value(
-            output=curve.output,
-            state_key=curve.state_key,
-            channel=curve.channel,
-            control=curve.control,
-            value=bounded,
-            force=force_midi,
-        )
+        input_min = self._resolve_dynamic_number_locked(curve.minimum, fallback=0.0)
+        input_max = self._resolve_dynamic_number_locked(curve.maximum, fallback=127.0)
+        bounded = quantize_curve_value(curve, value, minimum=input_min, maximum=input_max)
+        self._state[curve.state_key] = bounded
+        if curve.control is not None:
+            self._send_midi_control_value(
+                output=curve.output,
+                state_key=curve.state_key,
+                channel=curve.channel,
+                control=curve.control,
+                value=bounded,
+                force=force_midi,
+            )
         if curve.osc is None or self._osc_client is None:
             return
         osc_value = map_value(
             bounded,
-            input_min=curve.minimum,
-            input_max=curve.maximum,
-            output_min=curve.osc.minimum,
-            output_max=curve.osc.maximum,
+            input_min=input_min,
+            input_max=input_max,
+            output_min=self._resolve_optional_dynamic_number_locked(
+                curve.osc.minimum, fallback=input_min
+            ),
+            output_max=self._resolve_optional_dynamic_number_locked(
+                curve.osc.maximum, fallback=input_max
+            ),
         )
         self._osc_client.send_message(curve.osc.path, normalize_numeric_value(osc_value))
 
@@ -3255,6 +3683,99 @@ class RuntimeState:
                     self._sequencer_tick_progress[state_key] -= sequencer.ticks_per_step
                     self._advance_sequencer_locked(sequencer)
 
+    def _run_lfo_clock(self) -> None:
+        while not self._lfo_stop_event.wait(LFO_TICK_SECONDS):
+            try:
+                now = time.monotonic()
+                with self.lock:
+                    self._tick_lfos_locked(now)
+            except Exception as exc:
+                print(f"LFO clock failed: {exc}")
+
+    def _tick_lfos_locked(self, now: float) -> None:
+        for state_key, lfo in list(self._lfo_states.items()):
+            slider = self._sliders_by_key.get(state_key)
+            if slider is None:
+                self._lfo_states.pop(state_key, None)
+                continue
+            if not self._is_lfo_active(lfo):
+                lfo.last_tick_at = None
+                continue
+
+            if lfo.last_tick_at is None:
+                lfo.last_tick_at = now
+            elapsed = max(now - lfo.last_tick_at, 0.0)
+            lfo.last_tick_at = now
+            previous_phase = lfo.phase
+            lfo.phase = (lfo.phase + elapsed * lfo.rate * math.pi * 2.0) % (math.pi * 2.0)
+            if lfo.waveform == "s&h" and lfo.phase < previous_phase:
+                lfo.sample_hold_value = (random.random() * 2.0) - 1.0
+
+            lfo.noise_countdown -= elapsed
+            if lfo.noise_countdown <= 0.0:
+                lfo.noise_countdown = (0.12 + random.random() * 0.18) / max(lfo.rate, 0.001)
+                lfo.noise_target = (random.random() * 2.0) - 1.0
+            lfo.noise_value += (
+                (lfo.noise_target - lfo.noise_value)
+                * min(1.0, elapsed * 4.0 * lfo.rate)
+            )
+
+            center_ratio = self._slider_value_to_ratio_locked(slider, lfo.midpoint)
+            amplitude_ratio = lfo.depth / 2.0
+            shape = self._lfo_shape_value(lfo)
+            if slider.lfo_shape_control == "jitter":
+                shape = ((1.0 - lfo.jitter) * shape) + (lfo.jitter * lfo.noise_value)
+            next_value = quantize_slider_value(
+                slider,
+                self._slider_ratio_to_value_locked(slider, center_ratio + shape * amplitude_ratio),
+            )
+            if next_value == lfo.last_sent_value:
+                continue
+            lfo.last_sent_value = next_value
+            self._state[slider.state_key] = next_value
+            self._send_midi_value(slider, next_value)
+            self._send_osc_value(slider, next_value)
+
+    @staticmethod
+    def _is_lfo_active(lfo: LfoRuntimeState) -> bool:
+        return lfo.depth > 0.0 and lfo.rate > 0.0
+
+    def _lfo_shape_value(self, lfo: LfoRuntimeState) -> float:
+        cycle_position = ((lfo.phase / (math.pi * 2.0)) % 1.0 + 1.0) % 1.0
+        if lfo.waveform == "triangle":
+            return 1.0 - (4.0 * abs(cycle_position - 0.5))
+        if lfo.waveform == "square":
+            return 1.0 if cycle_position < 0.5 else -1.0
+        if lfo.waveform == "saw":
+            return (cycle_position * 2.0) - 1.0
+        if lfo.waveform == "ramp":
+            return 1.0 - (cycle_position * 2.0)
+        if lfo.waveform == "random":
+            return lfo.noise_value
+        if lfo.waveform == "s&h":
+            return lfo.sample_hold_value
+        return math.sin(lfo.phase)
+
+    def _slider_value_to_ratio_locked(self, slider: SliderConfig, value: float) -> float:
+        if slider.maximum == slider.minimum:
+            return 0.0
+        ratio = clamp_numeric_value(
+            (value - slider.minimum) / (slider.maximum - slider.minimum),
+            minimum=0.0,
+            maximum=1.0,
+        )
+        return invert_curve_ratio(
+            ratio,
+            self._resolve_dynamic_number_locked(slider.curve, fallback=0.0),
+        )
+
+    def _slider_ratio_to_value_locked(self, slider: SliderConfig, ratio: float) -> float:
+        curved_ratio = apply_curve_ratio(
+            clamp_numeric_value(ratio, minimum=0.0, maximum=1.0),
+            self._resolve_dynamic_number_locked(slider.curve, fallback=0.0),
+        )
+        return slider.minimum + curved_ratio * (slider.maximum - slider.minimum)
+
     def _normalize_memory_slots_locked(self, memory: MemoryConfig) -> list[MemorySlotState | None]:
         slots = list(self._memory_state.get(memory.state_key, []))
         normalized = slots[: memory.slots]
@@ -3292,6 +3813,10 @@ class RuntimeState:
                         self._transition_generation.get(slider.state_key, 0) + 1
                     )
                     self._update_slider_locked(slider, value, force_midi=True)
+                continue
+            toggle = self._toggles_by_key.get(key)
+            if toggle is not None:
+                self._update_toggle_locked(toggle, value, force_midi=True)
                 continue
             if self._tempo is not None and key == self._tempo.state_key:
                 self._update_tempo_locked(value)
@@ -3338,6 +3863,10 @@ class RuntimeState:
             slider = self._sliders_by_key.get(key)
             if slider is not None:
                 self._update_slider_locked(slider, value, force_midi=True)
+                continue
+            toggle = self._toggles_by_key.get(key)
+            if toggle is not None:
+                self._update_toggle_locked(toggle, value, force_midi=True)
                 continue
             if self._tempo is not None and key == self._tempo.state_key:
                 self._update_tempo_locked(value)
@@ -3388,6 +3917,13 @@ class RuntimeState:
                 node, current + ((target - current) * degree)
             )
             return
+        if isinstance(node, ToggleConfig):
+            current = numeric.get(node.state_key, self._state.get(node.state_key, float(node.default)))
+            target = random.choice((node.minimum, node.maximum))
+            numeric[node.state_key] = quantize_toggle_value(
+                node, current + ((target - current) * degree)
+            )
+            return
         if isinstance(node, TempoConfig):
             current = numeric.get(node.state_key, self._tempo_bpm)
             target = random.uniform(node.minimum, node.maximum)
@@ -3416,7 +3952,7 @@ class RuntimeState:
         value_target = random.randint(sequencer.minimum, sequencer.maximum)
         velocity_target = random.randint(1, 127)
         gate_target = random.uniform(0.01, sequencer.max_gate_steps)
-        timing_target = random.uniform(-1.0, 1.0)
+        timing_target = random.uniform(-sequencer.max_timing, sequencer.max_timing)
         enabled = (
             random.choice((True, False))
             if mutator.mutate_sequencer_step and random.random() < degree
@@ -3479,6 +4015,9 @@ class RuntimeState:
         sequencers: dict[str, list[SequencerStepState]],
     ) -> None:
         if isinstance(node, SliderConfig):
+            numeric[node.state_key] = self._state.get(node.state_key, float(node.default))
+            return
+        if isinstance(node, ToggleConfig):
             numeric[node.state_key] = self._state.get(node.state_key, float(node.default))
             return
         if isinstance(node, TempoConfig):
@@ -3571,7 +4110,9 @@ class RuntimeState:
             return config.tempo.output
         return config.output
 
-    def _send_midi_value(self, slider: SliderConfig, value: float, *, force: bool = False) -> None:
+    def _send_midi_value(self, slider: SliderConfig | ToggleConfig, value: float, *, force: bool = False) -> None:
+        if slider.control is None:
+            return
         self._send_midi_control_value(
             output=slider.output,
             state_key=slider.state_key,
@@ -3599,7 +4140,7 @@ class RuntimeState:
             return
         message = mido.Message(
             "control_change",
-            channel=channel - 1,
+            channel=channel,
             control=control,
             value=midi_value,
         )
@@ -3613,7 +4154,7 @@ class RuntimeState:
             self._active_notes[note_key] = count + 1
             if count > 0:
                 return
-            message = mido.Message("note_on", channel=channel - 1, note=note, velocity=127)
+            message = mido.Message("note_on", channel=channel, note=note, velocity=127)
             self._midi_output(output).send(message)
             return
 
@@ -3621,7 +4162,7 @@ class RuntimeState:
             return
         if count == 1:
             self._active_notes.pop(note_key, None)
-            message = mido.Message("note_off", channel=channel - 1, note=note, velocity=0)
+            message = mido.Message("note_off", channel=channel, note=note, velocity=0)
             self._midi_output(output).send(message)
             return
         self._active_notes[note_key] = count - 1
@@ -3634,7 +4175,7 @@ class RuntimeState:
             return
         message = mido.Message(
             "note_on",
-            channel=channel - 1,
+            channel=channel,
             note=note,
             velocity=validate_range(velocity, 0, 127, "velocity", self.config_path),
         )
@@ -3642,7 +4183,7 @@ class RuntimeState:
 
     def _silence_active_notes_locked(self) -> None:
         for (output, channel, note), _count in list(self._active_notes.items()):
-            message = mido.Message("note_off", channel=channel - 1, note=note, velocity=0)
+            message = mido.Message("note_off", channel=channel, note=note, velocity=0)
             self._midi_output(output).send(message)
         self._active_notes.clear()
 
@@ -3653,12 +4194,12 @@ class RuntimeState:
         self._sequencer_positions[state_key] = next_index
         steps = self._sequencer_state.get(state_key, [])
         if next_index >= len(steps):
-            if sequencer.mode == "notes":
+            if sequencer.mode in {"notes", "note"}:
                 self._send_sequencer_note_locked(sequencer, None)
             return
 
         step = steps[next_index]
-        if sequencer.mode == "notes":
+        if sequencer.mode in {"notes", "note"}:
             if step.timing >= 0 or previous_index < 0:
                 offset_ticks = 0 if previous_index < 0 and step.timing < 0 else step_timing_ticks(
                     sequencer, step.timing
@@ -3681,15 +4222,17 @@ class RuntimeState:
     ) -> None:
         if not step.enabled:
             return
+        note = sequencer.note if sequencer.mode == "note" else step.value
+        velocity = step.value if sequencer.mode == "note" else step.velocity
         gate_ticks = sequencer_gate_ticks(sequencer, step.gate)
         if offset_ticks <= 0:
-            self._send_sequencer_note_locked(sequencer, step.value, step.velocity, gate_ticks)
+            self._send_sequencer_note_locked(sequencer, note, velocity, gate_ticks)
             return
         self._scheduled_sequencer_notes.append(
             ScheduledSequencerNote(
                 state_key=sequencer.state_key,
-                note=step.value,
-                velocity=step.velocity,
+                note=note,
+                velocity=velocity,
                 gate_ticks=gate_ticks,
                 remaining_ticks=offset_ticks,
             )
@@ -3785,9 +4328,11 @@ class RuntimeState:
         self._active_buttons[button.state_key] = count - 1
 
     def _send_button_cc_locked(self, button: ButtonConfig, value: int) -> None:
+        if button.control is None:
+            return
         message = mido.Message(
             "control_change",
-            channel=button.channel - 1,
+            channel=button.channel,
             control=button.control,
             value=value,
         )
@@ -3798,7 +4343,7 @@ class RuntimeState:
             return
         message = mido.Message(
             "control_change",
-            channel=sequencer.channel - 1,
+            channel=sequencer.channel,
             control=sequencer.control,
             value=value,
         )
@@ -3816,8 +4361,12 @@ class RuntimeState:
             value,
             input_min=sequencer.minimum,
             input_max=sequencer.maximum,
-            output_min=sequencer.osc.minimum,
-            output_max=sequencer.osc.maximum,
+            output_min=self._resolve_optional_dynamic_number_locked(
+                sequencer.osc.minimum, fallback=float(sequencer.minimum)
+            ),
+            output_max=self._resolve_optional_dynamic_number_locked(
+                sequencer.osc.maximum, fallback=float(sequencer.maximum)
+            ),
         )
         self._osc_client.send_message(sequencer.osc.path, normalize_numeric_value(osc_value))
 
@@ -3831,17 +4380,87 @@ class RuntimeState:
                 f"Could not open OSC output '{osc_config.host}:{osc_config.port}'"
             ) from exc
 
-    def _send_osc_value(self, slider: SliderConfig, value: float) -> None:
+    def _send_osc_value(self, slider: SliderConfig | ToggleConfig, value: float) -> None:
         if slider.osc is None or self._osc_client is None:
             return
         osc_value = map_value(
             value,
             input_min=slider.minimum,
             input_max=slider.maximum,
-            output_min=slider.osc.minimum,
-            output_max=slider.osc.maximum,
+            output_min=self._resolve_optional_dynamic_number_locked(
+                slider.osc.minimum, fallback=float(slider.minimum)
+            ),
+            output_max=self._resolve_optional_dynamic_number_locked(
+                slider.osc.maximum, fallback=float(slider.maximum)
+            ),
         )
         self._osc_client.send_message(slider.osc.path, normalize_numeric_value(osc_value))
+
+    def _resolve_dynamic_number_locked(self, value: DynamicNumber, *, fallback: float) -> float:
+        if not isinstance(value, str):
+            return float(value)
+
+        reference = value.strip()
+        if not reference:
+            return fallback
+
+        slider = next(
+            (
+                candidate
+                for candidate in self._sliders_by_key.values()
+                if reference in {candidate.name, candidate.state_key}
+            ),
+            None,
+        )
+        if slider is not None:
+            return float(self._state.get(slider.state_key, slider.default))
+
+        toggle = self._toggles_by_key.get(reference)
+        if toggle is None:
+            toggle = next(
+                (
+                    candidate
+                    for candidate in self._toggles_by_key.values()
+                    if candidate.name == reference
+                ),
+                None,
+            )
+        if toggle is not None:
+            return float(self._state.get(toggle.state_key, toggle.default))
+
+        if self._tempo is not None and reference in {self._tempo.name, self._tempo.state_key}:
+            return float(self._tempo_bpm)
+
+        button = self._buttons_by_key.get(reference)
+        if button is None:
+            button = next(
+                (
+                    candidate
+                    for candidate in self._buttons_by_key.values()
+                    if candidate.name == reference
+                ),
+                None,
+            )
+        if button is not None:
+            return 127.0 if self._active_buttons.get(button.state_key, 0) > 0 else 0.0
+
+        if reference in self._curves_by_key:
+            return float(self._state.get(reference, 0.0))
+        curve = next((candidate for candidate in self._curves if candidate.name == reference), None)
+        if curve is not None:
+            return float(self._state.get(curve.state_key, curve.default))
+
+        try:
+            return float(reference)
+        except ValueError:
+            return fallback
+
+    def _resolve_optional_dynamic_number_locked(
+        self, value: DynamicNumber | None, *, fallback: float
+    ) -> float:
+        if value is None:
+            return fallback
+        return self._resolve_dynamic_number_locked(value, fallback=fallback)
 
     def _read_mtime_ns(self) -> int:
         return self.config_path.stat().st_mtime_ns
@@ -3866,13 +4485,18 @@ def close_midi_outputs(outputs: dict[str, mido.ports.BaseOutput]) -> None:
         midi_out.close()
 
 
-def serialize_osc_route(route: OscRouteConfig | None) -> dict[str, Any] | None:
+def serialize_osc_route(
+    route: OscRouteConfig | None,
+    *,
+    minimum: DynamicNumber = 0.0,
+    maximum: DynamicNumber = 1.0,
+) -> dict[str, Any] | None:
     if route is None:
         return None
     return {
         "path": route.path,
-        "min": normalize_numeric_value(route.minimum),
-        "max": normalize_numeric_value(route.maximum),
+        "min": normalize_numeric_value(route.minimum if route.minimum is not None else minimum),
+        "max": normalize_numeric_value(route.maximum if route.maximum is not None else maximum),
     }
 
 
@@ -3889,6 +4513,32 @@ def clamp_numeric_value(value: float, *, minimum: float, maximum: float) -> floa
     return min(maximum, max(minimum, value))
 
 
+def apply_curve_ratio(ratio: float, curve: float) -> float:
+    bounded = clamp_numeric_value(ratio, minimum=0.0, maximum=1.0)
+    exponent = slider_curve_exponent(curve)
+    if exponent == 1:
+        return bounded
+    if curve > 0:
+        return bounded**exponent
+    return 1 - ((1 - bounded) ** exponent)
+
+
+def invert_curve_ratio(ratio: float, curve: float) -> float:
+    bounded = clamp_numeric_value(ratio, minimum=0.0, maximum=1.0)
+    exponent = slider_curve_exponent(curve)
+    if exponent == 1:
+        return bounded
+    if curve > 0:
+        return bounded ** (1 / exponent)
+    return 1 - ((1 - bounded) ** (1 / exponent))
+
+
+def slider_curve_exponent(curve: float) -> float:
+    if not math.isfinite(curve) or curve == 0:
+        return 1
+    return 2 ** min(abs(curve), 12)
+
+
 def quantize_slider_value(slider: SliderConfig, value: float) -> float:
     bounded = clamp_numeric_value(value, minimum=slider.minimum, maximum=slider.maximum)
     if slider.steps is None:
@@ -3903,8 +4553,21 @@ def quantize_slider_value(slider: SliderConfig, value: float) -> float:
     return clamp_numeric_value(quantized, minimum=slider.minimum, maximum=slider.maximum)
 
 
-def quantize_curve_value(curve: CurveConfig, value: float) -> float:
-    return clamp_numeric_value(value, minimum=curve.minimum, maximum=curve.maximum)
+def quantize_toggle_value(toggle: ToggleConfig, value: float) -> float:
+    midpoint = toggle.minimum + ((toggle.maximum - toggle.minimum) / 2)
+    return toggle.maximum if value >= midpoint else toggle.minimum
+
+
+def quantize_curve_value(
+    curve: CurveConfig, value: float, *, minimum: float | None = None, maximum: float | None = None
+) -> float:
+    resolved_minimum = float(curve.minimum) if minimum is None and not isinstance(curve.minimum, str) else minimum
+    resolved_maximum = float(curve.maximum) if maximum is None and not isinstance(curve.maximum, str) else maximum
+    if resolved_minimum is None:
+        resolved_minimum = 0.0
+    if resolved_maximum is None:
+        resolved_maximum = 127.0
+    return clamp_numeric_value(value, minimum=resolved_minimum, maximum=resolved_maximum)
 
 
 def quantize_tempo_value(tempo: TempoConfig, value: float) -> float:
@@ -3930,7 +4593,7 @@ def normalize_sequencer_steps(
                     value=default_value,
                     velocity=sequencer.default_velocity,
                     gate=quantize_sequencer_gate(sequencer, sequencer.default_gate),
-                    timing=quantize_sequencer_timing(sequencer.default_timing),
+                    timing=quantize_sequencer_timing(sequencer, sequencer.default_timing),
                 )
             )
             continue
@@ -3941,7 +4604,7 @@ def normalize_sequencer_steps(
                     value=quantize_sequencer_value(sequencer, float(raw_step.value)),
                     velocity=quantize_sequencer_velocity(raw_step.velocity),
                     gate=quantize_sequencer_gate(sequencer, raw_step.gate),
-                    timing=quantize_sequencer_timing(raw_step.timing),
+                    timing=quantize_sequencer_timing(sequencer, raw_step.timing),
                 )
             )
             continue
@@ -3965,13 +4628,15 @@ def normalize_sequencer_steps(
                 value=quantize_sequencer_value(sequencer, float(raw_value)),
                 velocity=quantize_sequencer_velocity(raw_velocity),
                 gate=quantize_sequencer_gate(sequencer, raw_gate),
-                timing=quantize_sequencer_timing(raw_timing),
+                timing=quantize_sequencer_timing(sequencer, raw_timing),
             )
         )
     return steps
 
 
 def default_sequencer_value(sequencer: SequencerConfig) -> int:
+    if sequencer.mode == "note":
+        return quantize_sequencer_value(sequencer, float(sequencer.default_velocity))
     if sequencer.mode == "notes":
         base = sequencer.root if sequencer.root is not None else 60
         return quantize_sequencer_value(sequencer, float(base))
@@ -3980,6 +4645,8 @@ def default_sequencer_value(sequencer: SequencerConfig) -> int:
 
 
 def quantize_sequencer_value(sequencer: SequencerConfig, value: float) -> int:
+    if sequencer.mode == "note":
+        return quantize_sequencer_velocity(value)
     bounded = int(round(clamp_numeric_value(value, minimum=sequencer.minimum, maximum=sequencer.maximum)))
     if sequencer.mode != "notes" or sequencer.scale is None or sequencer.root is None:
         return bounded
@@ -4007,8 +4674,10 @@ def quantize_sequencer_gate(sequencer: SequencerConfig, value: float) -> float:
     return round(bounded * 100.0) / 100.0
 
 
-def quantize_sequencer_timing(value: float) -> float:
-    return round(clamp_numeric_value(value, minimum=-1.0, maximum=1.0) * 100.0) / 100.0
+def quantize_sequencer_timing(sequencer: SequencerConfig, value: float) -> float:
+    return round(
+        clamp_numeric_value(value, minimum=-sequencer.max_timing, maximum=sequencer.max_timing) * 100.0
+    ) / 100.0
 
 
 def sequencer_gate_ticks(sequencer: SequencerConfig, gate: float) -> int:
@@ -4016,7 +4685,8 @@ def sequencer_gate_ticks(sequencer: SequencerConfig, gate: float) -> int:
 
 
 def step_timing_ticks(sequencer: SequencerConfig, timing: float) -> int:
-    return max(0, int(round(quantize_sequencer_timing(timing) * sequencer.ticks_per_step)))
+    bounded = clamp_numeric_value(timing, minimum=0.0, maximum=1.0)
+    return max(0, int(round(bounded * sequencer.ticks_per_step)))
 
 
 def serialize_sequencer_steps(steps: list[SequencerStepState]) -> list[dict[str, Any]]:
@@ -4032,7 +4702,9 @@ def serialize_sequencer_steps(steps: list[SequencerStepState]) -> list[dict[str,
     ]
 
 
-def normalize_numeric_value(value: float) -> int | float:
+def normalize_numeric_value(value: DynamicNumber) -> int | float | str:
+    if isinstance(value, str):
+        return value
     if float(value).is_integer():
         return int(value)
     return value

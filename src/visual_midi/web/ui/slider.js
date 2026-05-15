@@ -9,6 +9,7 @@ import {
   sliderRatioToValue,
   sliderValueToRatio,
 } from "../utils/math.js";
+import { installDynamicNumberAccessors } from "../utils/dynamic.js";
 
 const DEFAULT_WHEEL_PIXELS = 240;
 const WHEEL_AXIS_DEADZONE = 1.2;
@@ -52,6 +53,15 @@ export function createSlider(options) {
     pointerMoved: false,
     wheelRemainder: 0,
   };
+  installDynamicNumberAccessors(state, {
+    min: { source: options.min, fallback: 0 },
+    max: { source: options.max, fallback: 1 },
+    steps: { source: options.steps, fallback: 0, min: 0, integer: true },
+    speed: { source: options.speed, fallback: 1, min: Number.MIN_VALUE },
+    curve: { source: options.curve, fallback: 0 },
+    inertia: { source: options.inertia, fallback: 0, min: 0 },
+    wheelPixels: { source: options.wheelPixels, fallback: DEFAULT_WHEEL_PIXELS, min: 1 },
+  });
 
   state.element.className = state.className;
   if (state.element.tagName === "BUTTON") {
@@ -235,7 +245,8 @@ function attachKeyboardHandler(state) {
   state.element.addEventListener("keydown", (event) => {
     const ratio = sliderValueToRatio(state, state.value);
     let nextRatio = ratio;
-    const step = state.steps ? 1 / Math.max(state.steps - 1, 1) : KEYBOARD_RATIO_STEP;
+    const steps = Number(state.steps);
+    const step = Number.isFinite(steps) && steps >= 2 ? 1 / Math.max(steps - 1, 1) : KEYBOARD_RATIO_STEP;
 
     if (event.key === "ArrowUp" || event.key === "ArrowRight") {
       nextRatio = ratio + step;
@@ -266,7 +277,7 @@ function applyLegacyWheel(state, event) {
     return;
   }
   const nextValue =
-    state.steps || state.max === state.min
+    (Number.isFinite(Number(state.steps)) && Number(state.steps) >= 2) || state.max === state.min
       ? state.value + valueDelta
       : sliderRatioToValue(
           state,
@@ -313,7 +324,8 @@ function wheelRatioDelta(state, normalizedDelta) {
     state.orientation === "vertical"
       ? normalizedDelta / state.wheelPixels
       : -normalizedDelta / state.wheelPixels;
-  if (!state.steps) {
+  const steps = Number(state.steps);
+  if (!Number.isFinite(steps) || steps < 2) {
     state.wheelRemainder = 0;
     return rawDelta * state.speed;
   }
@@ -322,7 +334,7 @@ function wheelRatioDelta(state, normalizedDelta) {
     state.wheelRemainder = 0;
   }
   state.wheelRemainder += rawDelta;
-  const stepRatio = 1 / Math.max(state.steps - 1, 1);
+  const stepRatio = 1 / Math.max(steps - 1, 1);
   const stepCount = Math.trunc(Math.abs(state.wheelRemainder) / stepRatio);
   if (stepCount === 0) {
     return 0;

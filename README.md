@@ -15,24 +15,24 @@ The server prefers port `8765` on each run and falls back to a random free port 
 
 ## Config format
 
-Configs stay in YAML, but the backend normalizes them into JSON for the browser UI. Layout is defined as nested `rows`, `columns`, and `tabs` containers. A node is a container if it has `rows:`, `columns:`, or `tabs:`. Otherwise it is treated as a control. Controls may declare `type`, and if omitted they default to `slider`.
+Configs stay in YAML, but the backend normalizes them into JSON for the browser UI. Layout is defined as nested `row`, `column`, and `tabs` containers. A node is a container if it has `row:`, `column:`, or `tabs:`. Otherwise it is treated as a control. Controls may declare `type`, and if omitted they default to `slider`.
 
-Container children can carry sizing fields and shared slider defaults next to their layout key. Slider defaults cascade down to descendant sliders unless a child overrides them. `channel` defaults to `1` if nothing sets it. For example, if a `rows` child is a `columns` container, put `height`, `channel`, `color`, or `steps` on the same mapping as `columns`:
+Container children can carry sizing fields and shared slider defaults next to their layout key. Slider defaults cascade down to descendant sliders unless a child overrides them. `channel` defaults to `0` if nothing sets it. For example, if a `column` child contains a `row`, put `height`, `channel`, `color`, or `steps` on the same mapping as `row`:
 
 ```yaml
-rows:
+column:
   - height: 70%
-    channel: 1
+    channel: 0
     color: sand
     steps: 25
-    columns:
+    row:
       - name: 1
         control: 1
         default: 0
       - name: 2
         control: 2
         default: 0
-  - columns:
+  - row:
       - name: 3
         control: 3
         color: moss
@@ -49,10 +49,10 @@ osc:
 palette:
   orange: "#d26a2e"
   moss: "#5f8f6b"
-columns:
-  - rows:
+row:
+  - column:
       - name: Freq
-        channel: 1
+        channel: 0
         control: 74
         default: 64
         color: orange
@@ -62,69 +62,72 @@ columns:
           min: 20
           max: 20000
       - name: LFO Freq
-        channel: 1
+        channel: 0
         control: 75
         default: 32
         color: moss
-  - rows:
+  - column:
       - name: Freq 2
-        channel: 1
+        channel: 0
         control: 74
         default: 64
         color: orange
       - name: LFO Freq 2
-        channel: 1
+        channel: 0
         control: 75
         default: 32
         color: moss
   - tabs:
       - tab:
           name: Tabbed Content A
-          rows:
+          column:
             - name: Env A
-              channel: 1
+              channel: 0
               control: 76
               default: 48
       - tab:
           name: Tabbed Content B
-          rows:
+          column:
             - name: Env B
-              channel: 1
+              channel: 0
               control: 77
               default: 48
 ```
 
 The layout fills the available UI area as a mosaic:
 
-- children inside `rows` split the available height equally by default
-- children inside `columns` split the available width equally by default
+- children inside `column` stack vertically and split the available height equally by default
+- children inside `row` sit side-by-side and split the available width equally by default
 - children inside `tabs` render as one visible panel at a time with clickable tab labels
 - explicit `width` or `height` values can be set with `%` or `px`
 - any remaining space is distributed evenly across siblings without an explicit size
 
 Supported control fields:
 
-- `type`: optional, `slider`, `lfo`, `keyboard`, `button`, `curve`, `tempo`, `sequencer`, `memory`, or `mutator`, defaults to `slider`; `lfo` is kept as a compatibility alias for a slider that opens in the LFO controls
+- `type`: optional, `slider`, `keyboard`, `button`, `toggle`, `curve`, `tempo`, `sequencer`, `memory`, or `mutator`, defaults to `slider`
 - `name`
 - `color`: any CSS color string or a name from the root `palette`, optional when inherited from a parent container
 - `show_label`: optional boolean, defaults to `true`; set `false` to hide the control title and MIDI/OSC metadata, may be inherited from a parent container
 - `width`, `height`: optional `%` or `px` sizes for the control tile
+- numeric control attributes may be either literal numbers or the name of another control; when a name is used, the browser resolves it to that control's current value so the attribute can change live
 
 Controls that send channel messages use:
 
-- `channel` from `1` to `16`, optional when inherited from a parent container, defaults to `1`
+- `channel` from `0` to `15`, optional when inherited from a parent container, defaults to `0`
+- `control` from `0` to `127`, optional; omit it for OSC-only or internal controls
 
 Supported slider fields:
 
-- `control` from `0` to `127`
-- `default`, `min`, `max`: optional, may be inherited from a parent container
+- `control` from `0` to `127`, optional
+- `default`, `min`, `max`: optional finite numbers, may be inherited from a parent container; MIDI output is still rounded/clamped at send time
 - `steps`: optional integer `>= 2` that snaps the slider to a fixed number of positions between `min` and `max`, inclusive, may be inherited from a parent container
 - `speed`: optional positive number, where `1` keeps the current feel, smaller values move faster, and larger values require more drag/scroll movement for smaller value changes, may be inherited from a parent container
 - `curve`: optional number, defaults to `0`; `0` maps slider position linearly to the sent value, positive values bunch sent values toward the high end of the visual slider, and negative values bunch them toward the low end, may be inherited from a parent container
 - `orientation`: `horizontal` or `vertical`, may be inherited from a parent container
 - `osc`: optional per-slider OSC mapping
+- `osc`: may be a mapping such as `{ path: cutoff }` or a string path such as `osc: cutoff`
 - `osc.path`: OSC address to send when the slider changes
-- `osc.min`, `osc.max`: output range for the OSC value after mapping from the slider's `min`/`max`
+- `osc.min`, `osc.max`: optional output range for the OSC value after mapping from the slider's `min`/`max`; omitted values inherit the slider's `min`/`max`; each may be a number or control name, and `osc.max` may be lower than `osc.min` to invert the OSC scale
 - `complex`: optional boolean, defaults to `true`; set `false` to use the simpler single-surface LFO UI
 - `max_speed`: optional non-negative number, defaults to `12`; the speed control ranges from `0` to `max_speed`, and `0` stops all motion
 - `quantize_speed`: optional boolean, defaults to `false`; when `true`, the speed control snaps to tempo divisions from `16 bar` through `1/32`, including dotted intervals and a triplet interval, using the current transport BPM
@@ -132,7 +135,6 @@ Supported slider fields:
 - `shape_control`: optional `waveform` or `jitter`, defaults to `waveform`; in complex mode this chooses whether the bottom-right panel selects the waveform or controls jitter
 - double tap/click toggles between the slider surface and the LFO controls
 - sliders start with depth `0` and speed `0`, so they do not animate until LFO depth and speed are raised
-- `type: lfo` controls open in the LFO controls and, if `default` is omitted, start centered between `min` and `max`
 - when the LFO controls are hidden, drag or scroll changes the LFO center point; any active LFO motion continues
 - in the simple LFO UI, vertical drag or scroll changes depth, horizontal drag or scroll changes rate
 - depth, rate, waveform, and jitter are remembered in browser storage per control key
@@ -142,11 +144,12 @@ Supported slider fields:
 Supported curve fields:
 
 - `type: curve`
-- `control` from `0` to `127`
-- `length`: positive number of seconds represented by the curve
+- `control` from `0` to `127`, optional
+- `length`: positive number of seconds represented by the curve, the name of another control, or a bar length string such as `1 bar`, `1/2 bar`, or `4 bars` relative to the global BPM
 - `mode`: optional `loop` or `trigger`, defaults to `loop`; loop mode continuously plays with a visible playhead until stopped, trigger mode runs once per play
-- `default`, `min`, `max`: optional MIDI/OSC value range fields; `initial` is accepted as a compatibility alias for `default`
-- `osc`: optional per-curve OSC mapping using the same `osc.path`, `osc.min`, and `osc.max` fields as sliders
+- `default`: optional finite value used for the single point after `Clear`
+- `min`, `max`: optional finite value range fields or the name of another control; MIDI output is still rounded/clamped at send time
+- `osc`: optional per-curve OSC mapping using the same string shorthand and `osc.path`, `osc.min`, and `osc.max` fields as sliders
 - use `Play` / `Stop` to control playback, click the canvas to add a point, drag points to edit them, double-click a non-start point to remove it, and use `Clear` to return to the initial horizontal line
 
 Supported keyboard fields:
@@ -172,6 +175,14 @@ Supported button fields:
 - button press sends MIDI CC `127` and button release sends MIDI CC `0`
 - if `osc` is present, button press sends `1` and release sends `0`
 
+Supported toggle fields:
+
+- `type: toggle`
+- `control`: optional MIDI CC number from `0` to `127`
+- `default`, `min`, `max`: optional finite numbers, defaulting to `0`, `0`, and `127`
+- `osc`: optional OSC route using the same string shorthand and `osc.path`, `osc.min`, and `osc.max` fields as sliders
+- toggles stick on or off and send `max` when on, `min` when off
+
 Supported tempo fields:
 
 - `type: tempo`
@@ -186,23 +197,26 @@ Supported tempo fields:
 Supported sequencer fields:
 
 - `type: sequencer`
-- `mode`: `notes` or `cc`
+- `mode`: `notes`, `note`, or `cc`
 - `size`: required number of steps, `>= 1`
 - `subdivision`: required step timing as a note fraction like `1/16` or a positive beat value
-- `channel`: MIDI channel from `1` to `16`
-- `min`, `max`: optional value range, defaults to `0..127`
+- `channel`: MIDI channel from `0` to `15`
+- `min`, `max`: optional value range, defaults to `0 — 127`
 - `root`, `scale`: optional for `notes`; when both are present, step values are quantized to that scale and `root` becomes the initial value for new steps
 - `velocity`: optional default note velocity from `1` to `127`, used even when the velocity row is hidden, default `127`
+- `note`: required for `note`; this mode sequences one fixed MIDI note, and each step's main slider sets that note's velocity
 - `gate`: optional default note hold length in steps, used even when the gate row is hidden, must be greater than `0` and no greater than `max_gate_steps`, default `1`
-- `timing`: optional default micro timing from `-1` to `1`, where `-1` is the previous step boundary, `0` is the current step boundary, and `1` is the next step boundary, default `0`
-- `velocity_row`/`show_velocity`: optional boolean for `notes`; shows a per-step velocity row, default `false`
+- `timing`: optional default micro timing from `-timing_max` to `timing_max`, where negative values move earlier, `0` is the current step boundary, and positive values move later, default `0`
+- `velocity_row`/`show_velocity`: optional boolean for `notes`; shows a per-step velocity row, default `false`; not supported for `note`
 - `gate_row`/`show_gate`: optional boolean for `notes`; shows a per-step gate row, default `false`
 - `timing_row`/`show_timing`: optional boolean for `notes`; shows a per-step micro timing row, default `false`
 - `max_gate_steps`: optional number `>= 1` for `notes`; maximum gate value in steps, default `1`
+- `timing_max`/`max_timing`: optional number from `0` to `1` for note sequencers; maximum absolute micro-timing adjustment as a proportion of one step, so `0.5` allows `-0.5` through `0.5`, default `1`
 - `control`: optional for `cc`; required unless an `osc` route is present
 - `osc`: optional for `cc`; if present, the step value is mapped through `osc.min`/`osc.max` like a slider
 - sequencers use the app's global transport BPM, which comes from the tempo control when present or the root `bpm` otherwise
-- note sequencers send one note per active step and release it after its gate length or when transport stops
+- `notes` sequencers send one note per active step and release it after its gate length or when transport stops
+- `note` sequencers send one fixed note per active step; tap a step to enable/disable it, or drag to enable it and set velocity
 - cc sequencers emit their step value on each active step and skip disabled steps
 
 Supported memory fields:
@@ -234,8 +248,8 @@ Supported mutator fields:
 
 Supported layout group fields:
 
-- `rows`
-- `columns`
+- `row`
+- `column`
 - `tabs`
 - `name`: optional unique name so a `memory.target` or `mutator.target` can point at the whole container subtree
 - `channel`, `default`, `min`, `max`, `steps`, `speed`, `curve`, `orientation`, `color`: optional inherited defaults for descendant sliders and sequencers where relevant
@@ -245,7 +259,7 @@ Supported tab item fields:
 
 - `tab`
 - `tab.name`
-- exactly one of `tab.rows`, `tab.columns`, or `tab.tabs`
+- exactly one of `tab.row`, `tab.column`, or `tab.tabs`
 
 Optional root fields:
 
